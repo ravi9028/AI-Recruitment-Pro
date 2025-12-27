@@ -74,7 +74,11 @@ async function uploadResume(file) {
       // 1) Upload resume first
       const resumeUrl = await uploadResume(resumeFile);
 
-      // 2) Prepare payload
+      // 2) Get the token from localStorage (MUST match your Login.jsx storage key)
+      const token = localStorage.getItem("token");
+
+      // 3) Prepare payload - we REMOVE user_id: null because the backend
+      // will now get the ID from the Token instead
       const payload = {
         name: name.trim(),
         email: email.trim(),
@@ -83,36 +87,38 @@ async function uploadResume(file) {
         experience: experience.trim(),
         skills: skills.trim(),
         resume_url: resumeUrl,
-        video_url: "", // optional; implement if required
-        user_id: null // optional: if candidate linked to a user id; keep null or remove
+        video_url: ""
       };
 
-      // 3) Send candidate data to backend
-      const token = localStorage.getItem("token") || "";
-
+      // 4) Send candidate data with Authorization Header
       const res = await fetch("http://localhost:5000/api/candidates", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: token ? `Bearer ${token}` : undefined,
-  },
-  body: JSON.stringify(payload),
-});
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // ✅ THIS IS THE FIX: It tells Flask who is registering
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
 
-      setMessage({ type: "success", text: "Application submitted successfully!" });
-      // Clear form partially
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Profile creation failed");
+      }
+
+      setMessage({ type: "success", text: "Profile created! You can now apply for jobs." });
+
+      // Clear form
       setName(""); setEmail(""); setPhone(""); setLocation("");
       setSkills(""); setExperience(""); setResumeFile(null);
+
     } catch (err) {
       console.error("Submit error:", err);
-      // friendly error message
-      const text = err?.response?.data?.error || err?.message || "Submission failed";
-      setMessage({ type: "error", text });
+      setMessage({ type: "error", text: err.message });
     } finally {
       setLoading(false);
     }
   };
-
   return (
     <div className="candidate-container" style={styles.page}>
       <div style={styles.card}>

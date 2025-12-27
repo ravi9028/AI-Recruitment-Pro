@@ -272,9 +272,14 @@ def delete_job(job_id):
 @api_bp.route("/candidates", methods=["POST"])
 @jwt_required()
 def create_candidate():
-    user_id = get_jwt_identity()
-
+    user_id = get_jwt_identity()  # Identity from the JWT token
     data = request.json or {}
+
+    # Check if a profile is already linked to this user
+    existing = Candidate.query.filter_by(user_id=user_id).first()
+    if existing:
+        return jsonify({"message": "Candidate profile already exists", "id": existing.id}), 200
+
     candidate = Candidate(
         name=data.get("name"),
         email=data.get("email"),
@@ -283,14 +288,12 @@ def create_candidate():
         experience=data.get("experience"),
         skills=data.get("skills"),
         resume_url=data.get("resume_url"),
-        video_url=data.get("video_url"),
-        user_id=user_id   # 🔥 REQUIRED
+        user_id=user_id  # ✅ CRITICAL: Links the Candidate to the logged-in User
     )
 
     db.session.add(candidate)
     db.session.commit()
-
-    return jsonify({"message": "Candidate added", "candidate_id": candidate.id}), 201
+    return jsonify({"message": "Candidate profile created", "candidate_id": candidate.id}), 201
 
 # JOB APPLY KARNE KE LIYE YEH API USE KIYA HAI
 # @api_bp.route("/jobs/<int:job_id>/apply", methods=["OPTIONS"])
@@ -317,7 +320,7 @@ def apply_job(job_id):
     candidate = Candidate.query.filter_by(user_id=user_id).first()
     if not candidate:
         return jsonify({"error": "Candidate not found"}), 404
-
+    full_name = request.form.get("full_name")
     # Prevent duplicate
     existing = Application.query.filter_by(
         job_id=job_id,
@@ -484,6 +487,7 @@ def get_candidate_applications():
     sql = text("""
         SELECT 
             a.id,
+            a.job_id,
             j.title,
             j.location,
             a.status,
