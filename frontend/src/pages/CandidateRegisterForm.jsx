@@ -91,11 +91,10 @@ async function uploadResume(file) {
       };
 
       // 4) Send candidate data with Authorization Header
-      const res = await fetch("http://localhost:5000/api/candidates", {
-        method: "POST",
+      const res = await fetch("http://localhost:5000/api/candidate/update", {
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          // ✅ THIS IS THE FIX: It tells Flask who is registering
           "Authorization": `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
@@ -103,17 +102,18 @@ async function uploadResume(file) {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Profile creation failed");
+        throw new Error(errData.error || "Update failed");
       }
 
-      setMessage({ type: "success", text: "Profile created! You can now apply for jobs." });
+      setMessage({ type: "success", text: "Profile updated! Redirecting to dashboard..." });
 
-      // Clear form
-      setName(""); setEmail(""); setPhone(""); setLocation("");
-      setSkills(""); setExperience(""); setResumeFile(null);
+      // 3) Auto-redirect to dashboard after 2 seconds
+      setTimeout(() => {
+        nav("/candidate/dashboard");
+      }, 2000);
 
     } catch (err) {
-      console.error("Submit error:", err);
+      console.error("Update error:", err);
       setMessage({ type: "error", text: err.message });
     } finally {
       setLoading(false);

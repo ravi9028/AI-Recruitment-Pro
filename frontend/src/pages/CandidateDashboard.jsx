@@ -36,25 +36,25 @@ const [appliedDateMap, setAppliedDateMap] = useState({});
 
   const token = localStorage.getItem("token");
 const [statusMap, setStatusMap] = useState({});
-
+const [meetingLinkMap, setMeetingLinkMap] = useState({});
   // =====================================================
   // 1️⃣ Load ALL public jobs
   // =====================================================
-  useEffect(() => {
+useEffect(() => {
     const fetchJobs = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/jobs");
-const data = await res.json();
-setJobs(data.jobs || []);
-setFiltered(data.jobs || []);
-
+        const res = await fetch("http://localhost:5000/api/jobs", {
+           headers: { Authorization: `Bearer ${token}` } // ➕ Auth needed for meeting links [cite: 41]
+        });
+        const data = await res.json();
+        setJobs(data.jobs || []);
+        setFiltered(data.jobs || []);
       } catch (err) {
         console.error("Error fetching jobs", err);
       }
     };
-
     fetchJobs();
-  }, []);
+  }, [token]);
 
   // =====================================================
   // 2️⃣ Load applied job IDs ONCE (source of truth)
@@ -75,16 +75,19 @@ const data = await res.json();
 const ids = [];
 const statusObj = {};
 const dateObj = {};
+const linkObj = {};
 
 (data.applications || []).forEach(app => {
   ids.push(Number(app.job_id));
   statusObj[app.job_id] = app.status;
   dateObj[app.job_id] = app.applied_at;
+  linkObj[app.job_id] = app.meeting_link;
 });
 
 setAppliedJobIds(ids);
 setStatusMap(statusObj);
 setAppliedDateMap(dateObj);
+setMeetingLinkMap(linkObj);
     } catch (err) {
   console.error(err);
   setAppliedJobIds([]);
@@ -123,6 +126,9 @@ setAppliedDateMap(dateObj);
   };
 
   // =====================================================
+  // UI
+  // =====================================================
+ // =====================================================
   // UI
   // =====================================================
   return (
@@ -167,7 +173,7 @@ setAppliedDateMap(dateObj);
           </button>
         </div>
 
-        {/* JOB LIST */}
+        {/* JOB LIST — Phase 9.1 */}
         <div className="px-10 py-8 max-w-6xl mx-auto">
           <h2 className="text-2xl font-bold mb-4">
             Recommended Jobs
@@ -176,23 +182,30 @@ setAppliedDateMap(dateObj);
           {filtered.length === 0 ? (
             <p className="text-gray-600">No jobs found.</p>
           ) : (
-            <div className="space-y-4">
-              {filtered.map((job) => (
-                <JobCard
-  key={job.id}
-  job={job}
-  loading={loadingApplied}
-  applied={appliedJobIds.includes(Number(job.id))}
-  status={statusMap[job.id]}
-  appliedAt={appliedDateMap[job.id]}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filtered.map((job) => {
+                // 1. Prepare data variables
+                const isApplied = appliedJobIds.includes(Number(job.id));
+                const status = statusMap[job.id];
+                const appliedAt = appliedDateMap[job.id];
 
-   onApply={(jobId) => {
-              if (appliedJobIds.includes(jobId)) return; // HARD BLOCK
-              setSelectedJob(job);
-              setApplyOpen(true);
-            }}
-/>
-              ))}
+                // 2. Return the card
+                return (
+                  <JobCard
+                    key={job.id}
+                    job={job}
+                    applied={isApplied}
+                    status={status}
+                    appliedAt={appliedAt}
+                    meeting_link={meetingLinkMap[job.id]}
+                    onApply={() => {
+                      if (isApplied) return;
+                      setSelectedJob(job);
+                      setApplyOpen(true);
+                    }}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
@@ -210,11 +223,11 @@ setAppliedDateMap(dateObj);
             job={selectedJob}
             onClose={() => setApplyOpen(false)}
             onSuccess={(jobId) => {
-            setAppliedJobIds((prev) => prev.includes(jobId) ? prev : [...prev, jobId]
-            );
-            setApplyOpen(false);
-}}
-
+              setAppliedJobIds((prev) =>
+                prev.includes(jobId) ? prev : [...prev, jobId]
+              );
+              setApplyOpen(false);
+            }}
           />
         )}
       </div>

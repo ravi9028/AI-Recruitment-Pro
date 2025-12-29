@@ -3,7 +3,7 @@
 
 import React from "react";
 import { BrowserRouter, Routes, Route, Link, Navigate } from "react-router-dom";
-
+import InterviewRoom from "./pages/InterviewRoom";
 import Register from "./pages/Register";
 import Login from "./pages/Login";
 import CandidateForm from "./CandidateForm";
@@ -24,7 +24,7 @@ export default function App() {
    <BrowserRouter>
   <div style={{ padding: 10 }}>
     <Routes>
-
+     <Route path="/interview/:roomName" element={<InterviewRoom />} /> {/* 🟢 ALREADY HERE */}
       {/* Default redirect */}
       <Route path="/" element={<Navigate to="/login" replace />} />
 

@@ -6,8 +6,9 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import os
 from flask_jwt_extended import JWTManager
-
+from flask_mail import Mail
 db = SQLAlchemy()
+mail = Mail()
 jwt = JWTManager()
 
 def create_app():
@@ -33,21 +34,26 @@ def create_app():
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
     app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-    app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
-    app.config["ALLOWED_EXTENSIONS"] = {"pdf", "doc", "docx"}
-
+    # Increased to 100 MB to allow for video uploads
+    app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
+    app.config["ALLOWED_EXTENSIONS"] = {"pdf", "doc", "docx", "mp4", "webm"}
+    # EMAIL CONFIGURATION (Step 2)
+    # -------------------------------------------
+    app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Or your SMTP server
+    app.config['MAIL_PORT'] = 587
+    app.config['MAIL_USE_TLS'] = True
+    app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER')  # Your email
+    app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASS')  # Your App Password
+    app.config['MAIL_DEFAULT_SENDER'] = os.getenv('EMAIL_USER')
     # -------------------------------------------
     # INITIALIZE EXTENSIONS
     # -------------------------------------------
     db.init_app(app)
     jwt.init_app(app)
-
+    mail.init_app(app)
     # ✅ FIXED CORS (THIS SOLVES YOUR ERROR)
-    CORS(
-        app,
-        supports_credentials=True,
-        origins=["http://localhost:5173"],
-    )
+    # ✅ GLOBAL CORS FIX: Applies to all routes (/*) specifically for your frontend
+    CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}}, supports_credentials=True)
 
     # -------------------------------------------
     # REQUEST DEBUG LOGGER (KEPT)

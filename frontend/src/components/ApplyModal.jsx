@@ -7,7 +7,7 @@ export default function ApplyModal({ job, onClose, onSuccess }) {
   const [coverLetter, setCoverLetter] = useState("");
   const [resumeFile, setResumeFile] = useState(null);
   const [loading, setLoading] = useState(false);
-
+  const [videoFile, setVideoFile] = useState(null);
   const token = localStorage.getItem("token");
 
   // ----------------------------------
@@ -28,6 +28,9 @@ export default function ApplyModal({ job, onClose, onSuccess }) {
 
     if (resumeFile) {
       form.append("resume", resumeFile);
+    }
+    if (videoFile) {
+      form.append("video", videoFile);
     }
 
     try {
@@ -113,6 +116,22 @@ if (!res.ok) {
             type="file"
             onChange={(e) => setResumeFile(e.target.files[0])}
           />
+
+          0{/* ➕ ADD THIS VIDEO INPUT SECTION */}
+          <div className="space-y-1 mt-3 border-t pt-3">
+            <label className="text-sm font-medium text-gray-700">
+              Intro Video (Optional)
+            </label>
+            <input
+              type="file"
+              accept="video/*"
+              onChange={(e) => setVideoFile(e.target.files[0])}
+              className="w-full border p-2 rounded text-sm"
+            />
+            <p className="text-xs text-gray-500">
+              Upload a short video (MP4/WebM) introducing yourself.
+            </p>
+          </div>
 
           <div className="flex justify-end gap-3 mt-4">
             <button

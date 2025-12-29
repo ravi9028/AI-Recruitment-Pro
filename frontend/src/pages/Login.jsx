@@ -18,15 +18,12 @@ export default function Login() {
         body: JSON.stringify({ email, password }),
       });
 
-      // ❌ fetch does NOT throw automatically
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || "Login failed");
       }
 
-      // ✅ MUST parse JSON manually
       const data = await res.json();
-
       const { access_token, role, user_id } = data;
 
       if (!access_token) {
@@ -38,17 +35,16 @@ export default function Login() {
       localStorage.setItem("role", role);
       localStorage.setItem("user_id", user_id);
 
-      // ✅ Redirect by role
+       // ✅ SIMPLIFIED Redirect by role
       if (role === "hr") {
         nav("/hr/jobs");
       } else {
-        nav("/candidate/dashboard");
+        nav("/candidate/dashboard"); // Direct access
       }
     } catch (err) {
       alert("Login failed: " + err.message);
     }
   };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0A1834]">
       <div className="bg-white w-[900px] h-[520px] rounded-xl shadow-xl grid grid-cols-2 overflow-hidden">

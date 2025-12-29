@@ -1,6 +1,8 @@
 # backend/app/routes/api.py
 print("🔥 api.py has been loaded by Flask")
-
+from app.ai_engine import calculate_ai_score
+from flask_mail import Message
+from app import mail
 from flask import Blueprint, request, jsonify,  current_app
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import db
@@ -88,10 +90,30 @@ def register():
     user = User(email=email, password_hash=hashed, role=role)
     db.session.add(user)
     db.session.commit()
-
+    if role == "candidate":
+        new_candidate = Candidate(
+            user_id=user.id,
+            email=email,
+            name="New Candidate",  # Placeholder until they update it
+        )
+        db.session.add(new_candidate)
+        db.session.commit()  # Now the 'bridge' exists before they ever login!
     return jsonify({"message": "User registered", "user_id": user.id}), 201
 
 
+@api_bp.route("/candidate/me", methods=["GET"])
+@jwt_required()
+def get_current_candidate():
+    user_id = get_jwt_identity()
+    candidate = Candidate.query.filter_by(user_id=user_id).first()
+
+    if not candidate:
+        return jsonify({"error": "Profile not found"}), 404  # Triggers redirect to form
+
+    return jsonify({
+        "id": candidate.id,
+        "name": candidate.name
+    }), 200
 # -------------------------------------------------------
 # LOGIN (returns JWT containing role)
 # -------------------------------------------------------
@@ -129,7 +151,49 @@ def login():
     }), 200
 
 
+@api_bp.route("/candidate/update", methods=["PUT"])
+@jwt_required()
+def update_profile():
+    user_id = get_jwt_identity()
+    candidate = Candidate.query.filter_by(user_id=user_id).first()
 
+    if not candidate:
+        return jsonify({"error": "Candidate not found"}), 404
+
+    data = request.json or {}
+    # Update only the fields that are sent
+    candidate.name = data.get("name", candidate.name)
+    candidate.phone = data.get("phone", candidate.phone)
+    candidate.location = data.get("location", candidate.location)
+    candidate.skills = data.get("skills", candidate.skills)
+    candidate.experience = data.get("experience", candidate.experience)
+    candidate.resume_url = data.get("resume_url", candidate.resume_url)
+
+    db.session.commit()
+    return jsonify({"message": "Profile updated successfully"}), 200
+
+
+@api_bp.route("/candidate/update", methods=["PUT"])
+@jwt_required()
+def update_candidate_profile():
+    user_id = get_jwt_identity()
+    candidate = Candidate.query.filter_by(user_id=user_id).first()
+
+    if not candidate:
+        return jsonify({"error": "Candidate record not found"}), 404
+
+    data = request.get_json()
+
+    # Update fields only if they are present in the request
+    candidate.name = data.get("name", candidate.name)
+    candidate.phone = data.get("phone", candidate.phone)
+    candidate.location = data.get("location", candidate.location)
+    candidate.skills = data.get("skills", candidate.skills)
+    candidate.experience = data.get("experience", candidate.experience)
+    candidate.resume_url = data.get("resume_url", candidate.resume_url)
+
+    db.session.commit()
+    return jsonify({"message": "Profile updated successfully"}), 200
 # -------------------------------------------------------
 # HR JOB CREATION (PROTECTED)
 # -------------------------------------------------------
@@ -304,65 +368,91 @@ def create_candidate():
 #     response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
 #     return response, 200
 
-@api_bp.route("/jobs/<int:job_id>/apply", methods=["POST", "OPTIONS"])
-@cross_origin(origins="http://localhost:5173")
+# -------------------------------------------------------
+# APPLY JOB (Cleaned Version)
+# -------------------------------------------------------
+@api_bp.route("/jobs/<int:job_id>/apply", methods=["POST"]) # Removed OPTIONS
+# Removed @cross_origin (Global CORS in __init__.py handles this now)
 def apply_job(job_id):
-
-    # ✅ Handle preflight FIRST
-    if request.method == "OPTIONS":
-        return "", 204
-
-    # ✅ Now validate JWT
+    # 1. Auth Check
     verify_jwt_in_request()
     user_id = get_jwt_identity()
 
-    # Get candidate
     candidate = Candidate.query.filter_by(user_id=user_id).first()
     if not candidate:
         return jsonify({"error": "Candidate not found"}), 404
-    full_name = request.form.get("full_name")
-    # Prevent duplicate
-    existing = Application.query.filter_by(
-        job_id=job_id,
-        candidate_id=candidate.id
-    ).first()
+
+    # 2. Duplicate Check
+    existing = Application.query.filter_by(job_id=job_id, candidate_id=candidate.id).first()
     if existing:
         return jsonify({"message": "Already applied"}), 409
 
-    # Validate resume
+    # 3. Handle Resume (Required)
     resume = request.files.get("resume")
     if not resume:
         return jsonify({"error": "Resume is required"}), 400
 
-    # Read form fields
-    full_name = request.form.get("full_name")
-    email = request.form.get("email")
-    phone = request.form.get("phone")
-    cover_letter = request.form.get("cover_letter")
+    resume_filename = secure_filename(resume.filename)
+    unique_resume_name = f"{uuid.uuid4().hex}_{resume_filename}"
+    resume_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_resume_name)
+    resume.save(resume_path)
+    resume_url = f"/api/upload/files/{unique_resume_name}"
 
-    # Save file
-    filename = secure_filename(resume.filename)
-    unique_name = f"{uuid.uuid4().hex}_{filename}"
-    save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
-    resume.save(save_path)
+    # 4. Handle Video (Phase 7.1)
+    video = request.files.get("video")
+    video_url = None
 
-    resume_url = f"/api/upload/files/{unique_name}"
+    if video:
+        # Check file size manually if needed, but Nginx/Flask config usually handles it
+        video_filename = secure_filename(video.filename)
+        unique_video_name = f"{uuid.uuid4().hex}_{video_filename}"
+        video_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_video_name)
+        video.save(video_path)
+        video_url = f"/api/upload/files/{unique_video_name}"
 
-    # Create application
-    application = Application(
-        job_id=job_id,
-        candidate_id=candidate.id,
-        full_name=full_name,
-        email=email,
-        phone=phone,
-        resume_url=resume_url,
-        cover_letter=cover_letter,
-        status="Applied"
-    )
+    # ... (Video upload code is above this) ...
 
-    db.session.add(application)
-    db.session.commit()
+    # 🚀 AI SCORING TRIGGER
+    # Get the job details to find required skills
+        # ... (After saving video to disk) ...
 
+        # 🚀 AI SCORING TRIGGER
+        job = Job.query.get(job_id)
+
+        ai_score = 0
+        ai_feedback = ""
+        ai_graph = None  # ➕ Initialize graph data as empty
+
+        if job and job.required_skills and resume_path:
+            try:
+                # ✅ Capture 3 values: Score, Feedback, and the Graph Dictionary
+                ai_score, ai_feedback, ai_graph = calculate_ai_score(
+                    resume_path,
+                    video_path,
+                    job.required_skills
+                )
+                print(f"🤖 AI Score: {ai_score}% | Feedback: {ai_feedback}")
+            except Exception as e:
+                print(f"⚠️ AI Engine Error: {e}")
+
+        # 6. Save to Database with Graph Data
+        application = Application(
+            job_id=job_id,
+            candidate_id=candidate.id,
+            full_name=request.form.get("full_name"),
+            email=request.form.get("email"),
+            phone=request.form.get("phone"),
+            cover_letter=request.form.get("cover_letter"),
+            resume_url=resume_url,
+            video_url=video_url,
+            status="Applied",
+            score=ai_score,
+            feedback=ai_feedback,
+            graph_data=ai_graph  # ✅
+        )
+
+        db.session.add(application)
+        db.session.commit()
     return jsonify({"message": "Applied successfully"}), 201
 
 # ------------------------------
@@ -485,19 +575,19 @@ def get_candidate_applications():
         return jsonify({"applications": []})
 
     sql = text("""
-        SELECT 
-            a.id,
-            a.job_id,
-            j.title,
-            j.location,
-            a.status,
-            a.created_at AS applied_at
-        FROM application a
-        JOIN job j ON j.id = a.job_id
-        WHERE a.candidate_id = :cid
-        ORDER BY a.created_at DESC
-    """)
-
+            SELECT 
+                a.id,
+                a.job_id,
+                j.title,
+                j.location,
+                a.status,
+                a.created_at AS applied_at,
+                a.meeting_link  -- ➕ ADD THIS COLUMN TO FETCH FROM DB
+            FROM application a
+            JOIN job j ON j.id = a.job_id
+            WHERE a.candidate_id = :cid
+            ORDER BY a.created_at DESC
+        """)
     result = db.session.execute(sql, {"cid": candidate.id})
     rows = [dict(row._mapping) for row in result]
 
@@ -509,7 +599,9 @@ def get_candidate_applications():
 # -------------------------------------------------------
 @api_bp.route("/hr/jobs/<int:job_id>/applications", methods=["GET"])
 @jwt_required()
+@role_required("hr")
 def view_applicants(job_id):
+    # Fetching Applications, Candidates, and Users
     rows = (
         db.session.query(Application, Candidate, User)
         .join(Candidate, Application.candidate_id == Candidate.id)
@@ -520,6 +612,8 @@ def view_applicants(job_id):
 
     data = []
     for app, cand, user in rows:
+        is_flagged = "🚩" in (app.feedback or "")
+
         data.append({
             "application_id": app.id,
             "full_name": app.full_name or cand.name or user.email,
@@ -527,7 +621,11 @@ def view_applicants(job_id):
             "phone": app.phone,
             "resume_url": app.resume_url,
             "status": app.status,
-            "applied_at": app.created_at
+            "applied_at": app.created_at,
+            # ➕ ADD THESE THREE LINES FOR PHASE 8.2 [cite: 27-30]
+            "score": app.score,
+            "feedback": app.feedback,
+            "graph_data": app.graph_data
         })
 
     return jsonify({"applications": data}), 200
@@ -535,16 +633,74 @@ def view_applicants(job_id):
 
 @api_bp.route("/hr/applications/<int:app_id>/status", methods=["PATCH"])
 @jwt_required()
+@role_required("hr")
 def update_application_status(app_id):
     data = request.get_json()
-    status = data.get("status")
+    new_status = data.get("status")
 
-    if status not in ["Shortlisted", "Rejected"]:
+    if new_status not in ["Shortlisted", "Rejected"]:
         return jsonify({"error": "Invalid status"}), 400
 
-    app = Application.query.get_or_404(app_id)
-    app.status = status
+    app_record = Application.query.get_or_404(app_id)
+    app_record.status = new_status
+
+    # 🚀 PHASE 9.1: GENERATE UNIQUE INTERVIEW LINK
+    meeting_info = ""
+    if new_status == "Shortlisted":
+        # uuid is already imported at top of your file
+        unique_room = f"Interview-{app_id}-{uuid.uuid4().hex[:6]}"
+        app_record.meeting_link = f"https://meet.jit.si/{unique_room}"
+        meeting_info = f"\n\nYour Interview Link: {app_record.meeting_link}"
+    elif new_status == "Rejected":
+        meeting_info = f"\n\nLog in to your dashboard to view your detailed AI feedback."
+
+    try:
+        db.session.commit()
+
+        # Notification Logic [cite: 35-36]
+        msg = Message(
+            subject="Application Status Update",
+            recipients=[app_record.email],
+            body=(
+                f"Hello {app_record.full_name},\n\n"
+                f"Your status has been updated to: {new_status}."
+                f"{meeting_info}\n\n"
+                f"Best Regards,\nHR Team"
+            )
+        )
+        mail.send(msg)
+
+        return jsonify({
+            "message": "Status updated successfully",
+            "meeting_link": app_record.meeting_link
+        }), 200
+
+
+    except Exception as e:
+
+        db.session.rollback()
+
+        print(f"❌ ERROR: {str(e)}")
+
+        return jsonify({"error": str(e)}), 500
+
+    # 🚩 PHASE 9.3: FLAG SUSPICIOUS ACTIVITY (Aligned to the left margin) [cite: 44-48]
+
+@api_bp.route("/applications/<int:app_id>/flag", methods=["POST"])
+@jwt_required()
+def flag_application(app_id):
+
+    data = request.get_json()
+    reason = data.get("reason", "Suspicious activity detected")
+    app_record = Application.query.get_or_404(app_id)
+    # Update the feedback to include the red flag for HR [cite: 48]
+
+    existing_feedback = app_record.feedback or ""
+
+    app_record.feedback = f"{existing_feedback}\n🚩 ALERT: {reason}".strip()
+
     db.session.commit()
 
-    return jsonify({"message": "Status updated"}), 200
+    print(f"🚩 Phase 9.3: Incident logged for Application {app_id}: {reason}")
 
+    return jsonify({"message": "Incident flagged"}), 200

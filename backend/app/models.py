@@ -70,22 +70,28 @@ class Candidate(db.Model):
 # -------------------------------------------------------
 # APPLICATION MODEL
 # -------------------------------------------------------
+# backend/app/models.py
+
 class Application(db.Model):
-    __tablename__ = "application"   # ✅ SINGULAR (FINAL)
-
     id = db.Column(db.Integer, primary_key=True)
-    job_id = db.Column(db.Integer, db.ForeignKey("job.id"), nullable=False)
-    candidate_id = db.Column(db.Integer, db.ForeignKey("candidate.id"), nullable=False)
+    job_id = db.Column(db.Integer, db.ForeignKey('job.id'), nullable=False)
+    candidate_id = db.Column(db.Integer, db.ForeignKey('candidate.id'), nullable=False)
 
-    status = db.Column(db.String(50), default="Applied")
-    created_at = db.Column(db.DateTime, server_default=db.func.now())
-
-    full_name = db.Column(db.String(255))
-    email = db.Column(db.String(255))
-    phone = db.Column(db.String(50))
-    resume_url = db.Column(db.String(500))
+    full_name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(120), nullable=False)
+    phone = db.Column(db.String(20))
     cover_letter = db.Column(db.Text)
+    resume_url = db.Column(db.String(255), nullable=False)
 
+    video_url = db.Column(db.String(255), nullable=True)
+    score = db.Column(db.Integer, default=0)
+    feedback = db.Column(db.Text, nullable=True)
+    graph_data = db.Column(db.JSON, nullable=True)
+
+    status = db.Column(db.String(20), default='Applied')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    meeting_link = db.Column(db.String(255), nullable=True)
 
 class CandidatePreference(db.Model):
     """
