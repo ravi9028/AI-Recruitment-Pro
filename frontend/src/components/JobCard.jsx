@@ -1,4 +1,4 @@
-// JobCard.jsx
+// src/components/JobCard.jsx
 import { Link } from "react-router-dom";
 import React from "react";
 
@@ -8,7 +8,10 @@ export default function JobCard({
   status,
   appliedAt,
   loading,
-  meeting_link, // ➕ ADD THIS EXACT NAME HERE
+  meeting_link,
+  ai_score,
+  ai_feedback,
+  ai_graph, // 🟢 ADDED THIS (It was missing)
   onApply
 }) {
 
@@ -38,7 +41,7 @@ return (
         </div>
       </div>
 
-      {/* 3. Phase 9.2: Interview Link Section (FIXED PLACEMENT) */}
+      {/* 3. Phase 9.2: Interview Link Section */}
       {status === "Shortlisted" && applied && meeting_link && (
         <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md animate-pulse border-2">
           <p className="text-[10px] font-bold text-green-800 uppercase flex items-center gap-1">
@@ -53,13 +56,85 @@ return (
         </div>
       )}
 
-      {/* 4. AI Result Section */}
-      {applied && (status === "Shortlisted" || status === "Rejected") && (
-        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-           <p className="text-[10px] font-bold text-blue-800 uppercase">🤖 AI Analysis Result:</p>
-           <p className="text-xs text-slate-700 mt-1">
-             Match Score: <span className="font-bold text-blue-900">Calculated</span>
-           </p>
+      {/* 4. AI Analysis Section (Phase 8.3) */}
+      {applied && (
+        <div className="mt-3">
+          {status === "Applied" ? (
+            // 🔒 LOCKED VIEW (Pending)
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-md flex items-center gap-3 opacity-75">
+               <div className="bg-gray-200 p-2 rounded-full text-xs">🔒</div>
+               <div>
+                 <p className="text-xs font-bold text-gray-600">Analysis Locked</p>
+                 <p className="text-[10px] text-gray-500">Result visible after HR review.</p>
+               </div>
+            </div>
+          ) : (
+            // 🔓 UNLOCKED VIEW (Shortlisted/Rejected)
+            <div className={`p-3 rounded-md border ${
+              (ai_score || 0) > 70 ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
+            }`}>
+               <div className="flex justify-between items-center mb-1">
+                 <p className="text-[10px] font-bold uppercase text-slate-700">🤖 AI Match Score:</p>
+                 <span className={`text-lg font-black ${
+                    (ai_score || 0) > 70 ? "text-green-800" : "text-red-800"
+                 }`}>
+                   {ai_score || 0}%
+                 </span>
+               </div>
+
+               {/* 📊 NEW: SKILL GRAPH VISUALIZATION */}
+               {ai_graph && (
+                 <div className="mt-3 bg-white p-2 rounded border border-gray-100">
+                   <p className="text-[10px] font-bold uppercase text-slate-500 mb-2">Skill Gap Analysis</p>
+
+                   {/* Render the bars */}
+                   <div className="space-y-2">
+                     {/* 1. Matched Skills Bar */}
+                     <div>
+                       <div className="flex justify-between text-[9px] mb-0.5">
+                         <span className="font-bold text-green-700">Matched Skills</span>
+                         <span className="text-gray-500">{ai_graph.matched?.length || 0} found</span>
+                       </div>
+                       <div className="w-full bg-gray-200 rounded-full h-1.5">
+                         <div
+                           className="bg-green-500 h-1.5 rounded-full"
+                           style={{ width: `${ai_score}%` }}
+                         ></div>
+                       </div>
+                       <p className="text-[9px] text-slate-400 mt-0.5 truncate">
+                         {ai_graph.matched?.join(", ") || "None"}
+                       </p>
+                     </div>
+
+                     {/* 2. Missing Skills Bar */}
+                     <div>
+                       <div className="flex justify-between text-[9px] mb-0.5">
+                         <span className="font-bold text-red-700">Missing Skills</span>
+                         <span className="text-gray-500">{ai_graph.missing?.length || 0} missing</span>
+                       </div>
+                       <div className="w-full bg-gray-200 rounded-full h-1.5">
+                         <div
+                           className="bg-red-500 h-1.5 rounded-full"
+                           style={{ width: `${100 - (ai_score || 0)}%` }}
+                         ></div>
+                       </div>
+                       <p className="text-[9px] text-red-400 mt-0.5 font-medium">
+                         ⚠️ {ai_graph.missing?.join(", ") || "None"}
+                       </p>
+                     </div>
+                   </div>
+                 </div>
+               )}
+
+               {/* Feedback Preview */}
+               <div className="mt-2 text-[10px] text-slate-600 bg-white/60 p-2 rounded border border-gray-100">
+                 <p className="font-bold mb-0.5">💡 Key Feedback:</p>
+                 <p className="italic line-clamp-2">
+                   "{ai_feedback ? ai_feedback.substring(0, 100) : "Check dashboard for details..."}..."
+                 </p>
+               </div>
+            </div>
+          )}
         </div>
       )}
 

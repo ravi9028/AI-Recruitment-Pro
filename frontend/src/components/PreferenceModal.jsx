@@ -1,178 +1,163 @@
-// src/components/PreferenceModal.jsx
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 
 export default function PreferenceModal({ open, onClose, onSaved }) {
-  const [preferredRole, setPreferredRole] = useState("");
-  const [preferredLocation, setPreferredLocation] = useState("");
-  const [experienceLevel, setExperienceLevel] = useState("");
-  const [expectedSalary, setExpectedSalary] = useState("");
-
+  const [formData, setFormData] = useState({
+    preferred_role: "",
+    preferred_location: "",
+    experience_level: "",
+    expected_salary: ""
+  });
+  const [loading, setLoading] = useState(false);
   const token = localStorage.getItem("token");
 
-  // ----------------------------------
-  // Load existing preferences (FETCH)
-  // ----------------------------------
+  // 1. Fetch current preferences when modal opens
   useEffect(() => {
-    if (!open || !token) return;
-
-    const loadPreferences = async () => {
-      try {
-        const res = await fetch(
-          "http://localhost:5000/api/candidate/preferences",
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+    if (open) {
+      const fetchPrefs = async () => {
+        try {
+          const res = await fetch("http://localhost:5000/api/candidate/preferences", {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const data = await res.json();
+          if (data.preferences) {
+            setFormData({
+              preferred_role: data.preferences.preferred_role || "",
+              preferred_location: data.preferences.preferred_location || "",
+              experience_level: data.preferences.experience_level || "",
+              expected_salary: data.preferences.expected_salary || ""
+            });
           }
-        );
-
-        if (!res.ok) {
-          throw new Error("Failed to load preferences");
+        } catch (err) {
+          console.error("Failed to load preferences", err);
         }
-
-        const data = await res.json();
-        const p = data.preferences;
-
-        if (p) {
-          setPreferredRole(p.preferred_role || "");
-          setPreferredLocation(p.preferred_location || "");
-          setExperienceLevel(p.experience_level || "");
-          setExpectedSalary(p.expected_salary || "");
-        } else {
-          // reset if no preferences saved
-          setPreferredRole("");
-          setPreferredLocation("");
-          setExperienceLevel("");
-          setExpectedSalary("");
-        }
-      } catch (err) {
-        console.error("Could not load preferences:", err);
-      }
-    };
-
-    loadPreferences();
+      };
+      fetchPrefs();
+    }
   }, [open, token]);
 
-  // ----------------------------------
-  // Save preferences (FETCH)
-  // ----------------------------------
-  const savePreferences = async () => {
+  // 2. Handle Input Change
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  // 3. Save Changes
+  const handleSave = async () => {
+    setLoading(true);
     try {
-      const res = await fetch(
-        "http://localhost:5000/api/candidate/preferences",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            preferred_role: preferredRole,
-            preferred_location: preferredLocation,
-            experience_level: experienceLevel,
-            expected_salary: expectedSalary,
-          }),
-        }
-      );
+      const res = await fetch("http://localhost:5000/api/candidate/preferences", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(formData)
+      });
 
-      if (!res.ok) {
-        throw new Error("Failed to save preferences");
+      if (res.ok) {
+        onSaved();
+        onClose();
+      } else {
+        alert("Failed to save preferences.");
       }
-
-      alert("Preferences saved successfully");
-      if (onSaved) onSaved();
-      onClose();
     } catch (err) {
-      console.error("Error saving preferences", err);
-      alert("Failed to save preferences");
+      console.error(err);
+      alert("Error saving data.");
+    } finally {
+      setLoading(false);
     }
   };
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white w-full max-w-xl rounded-lg shadow-lg p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-semibold">Career Preferences</h3>
-          <button onClick={onClose} className="text-gray-600">
-            ✖
+    // 🌟 FIX: Added 'text-slate-800' to ensure visibility if something fails
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex justify-center items-center z-50 animate-fade-in font-sans">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+
+        {/* Header - Changed from bg-pro-dark to bg-slate-900 (Standard) */}
+        <div className="bg-slate-900 px-6 py-4 flex justify-between items-center">
+          <h3 className="text-white font-bold text-lg flex items-center gap-2">
+            <span>🎯</span> Update Your Habits
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-xl">
+            &times;
           </button>
         </div>
 
-        <div className="space-y-3">
-          <label className="block">
-            <div className="text-sm text-gray-700 mb-1">
-              Job role / keyword
-            </div>
+        {/* Body */}
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Preferred Role</label>
             <input
               type="text"
-              value={preferredRole}
-              onChange={(e) => setPreferredRole(e.target.value)}
+              name="preferred_role"
+              value={formData.preferred_role}
+              onChange={handleChange}
               placeholder="e.g. React Developer"
-              className="w-full border px-3 py-2 rounded"
+              className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-600 outline-none transition-all text-slate-800"
             />
-          </label>
+          </div>
 
-          <label className="block">
-            <div className="text-sm text-gray-700 mb-1">
-              Preferred location
-            </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Preferred Location</label>
             <input
               type="text"
-              value={preferredLocation}
-              onChange={(e) => setPreferredLocation(e.target.value)}
-              placeholder="City / Country"
-              className="w-full border px-3 py-2 rounded"
+              name="preferred_location"
+              value={formData.preferred_location}
+              onChange={handleChange}
+              placeholder="e.g. Mumbai, Remote"
+              className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-600 outline-none transition-all text-slate-800"
             />
-          </label>
+          </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <div className="text-sm text-gray-700 mb-1">
-                Experience level
-              </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Experience</label>
               <select
-                value={experienceLevel}
-                onChange={(e) => setExperienceLevel(e.target.value)}
-                className="w-full border px-3 py-2 rounded"
+                name="experience_level"
+                value={formData.experience_level}
+                onChange={handleChange}
+                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-600 outline-none transition-all text-slate-800"
               >
-                <option value="">-- Select --</option>
-                <option value="0-1">0-1 years</option>
-                <option value="1-3">1-3 years</option>
-                <option value="3-5">3-5 years</option>
-                <option value="5+">5+ years</option>
+                <option value="">Select...</option>
+                <option value="Fresher">Fresher (0-1 yrs)</option>
+                <option value="Junior">Junior (1-3 yrs)</option>
+                <option value="Mid">Mid-Level (3-5 yrs)</option>
+                <option value="Senior">Senior (5+ yrs)</option>
               </select>
-            </label>
+            </div>
 
-            <label className="block">
-              <div className="text-sm text-gray-700 mb-1">
-                Expected salary
-              </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Expected Salary</label>
               <input
                 type="text"
-                value={expectedSalary}
-                onChange={(e) => setExpectedSalary(e.target.value)}
-                placeholder="e.g. 6 LPA"
-                className="w-full border px-3 py-2 rounded"
+                name="expected_salary"
+                value={formData.expected_salary}
+                onChange={handleChange}
+                placeholder="e.g. 12 LPA"
+                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-600 outline-none transition-all text-slate-800"
               />
-            </label>
+            </div>
           </div>
+        </div>
 
-          <div className="flex gap-3 justify-end mt-4">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 border rounded"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={savePreferences}
-              className="px-4 py-2 bg-blue-600 text-white rounded"
-            >
-              Save Preferences
-            </button>
-          </div>
+        {/* Footer */}
+        <div className="bg-slate-50 px-6 py-4 flex justify-end gap-3 border-t border-slate-100">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-800 transition-colors"
+          >
+            Cancel
+          </button>
+
+          {/* 🌟 FIX: Changed bg-pro-primary to bg-teal-600 (Visible Standard Color) */}
+          <button
+            onClick={handleSave}
+            disabled={loading}
+            className="px-6 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-lg shadow-md transition-all active:scale-95 disabled:opacity-50"
+          >
+            {loading ? "Saving..." : "Save Preferences"}
+          </button>
         </div>
       </div>
     </div>

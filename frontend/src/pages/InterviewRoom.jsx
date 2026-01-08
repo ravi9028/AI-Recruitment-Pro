@@ -157,24 +157,31 @@ export default function InterviewRoom() {
 
   return (
     <div className="h-screen w-full bg-slate-900 flex flex-col font-sans">
-      {/* PROFESSIONAL SECURITY HEADER */}
-      <div className="p-4 bg-slate-800 text-white flex justify-between items-center shadow-xl border-b border-slate-700">
-        <div className="flex items-center gap-4">
-          <h2 className="text-lg font-bold uppercase tracking-tight">AI Recruitment Pro</h2>
+      {/* 📱 MOBILE-RESPONSIVE SECURITY HEADER */}
+      <div className="p-2 md:p-4 bg-slate-800 text-white flex justify-between items-center shadow-xl border-b border-slate-700">
 
-          <div className="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-full border border-green-500/30">
+        {/* Left Side: Logo & Badge */}
+        <div className="flex items-center gap-2 md:gap-4">
+          <h2 className="text-sm md:text-lg font-bold uppercase tracking-tight hidden sm:block">
+            AI Recruitment Pro
+          </h2>
+
+          {/* Compact Badge for Mobile */}
+          <div className="flex items-center gap-2 bg-slate-900 px-2 md:px-3 py-1 rounded-full border border-green-500/30">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
-            <span className="text-[10px] text-green-400 font-mono uppercase font-bold tracking-widest">
-              AI Proctoring Active
+            <span className="text-[9px] md:text-[10px] text-green-400 font-mono uppercase font-bold tracking-widest">
+              <span className="md:hidden">Active</span> {/* Short text for mobile */}
+              <span className="hidden md:inline">AI Proctoring Active</span> {/* Full text for PC */}
             </span>
           </div>
         </div>
 
+        {/* Right Side: Button */}
         <button
           onClick={() => navigate('/candidate/dashboard')}
-          className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded transition-all shadow-md active:scale-95"
+          className="px-3 md:px-6 py-1.5 md:py-2 bg-red-600 hover:bg-red-700 text-white text-[10px] md:text-xs font-bold rounded shadow-md active:scale-95 whitespace-nowrap"
         >
-          LEAVE INTERVIEW
+          LEAVE <span className="hidden md:inline">INTERVIEW</span>
         </button>
       </div>
 

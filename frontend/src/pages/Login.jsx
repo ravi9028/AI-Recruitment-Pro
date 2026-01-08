@@ -24,7 +24,7 @@ export default function Login() {
       }
 
       const data = await res.json();
-      const { access_token, role, user_id } = data;
+      const { access_token, role, user_id, name } = data; // 👈 Expect 'name' from backend
 
       if (!access_token) {
         throw new Error("Token missing in login response");
@@ -35,11 +35,17 @@ export default function Login() {
       localStorage.setItem("role", role);
       localStorage.setItem("user_id", user_id);
 
+      // 👇 THIS IS THE FIX: Save Name and Email
+      // If backend sends 'name', use it. Otherwise use a placeholder.
+      localStorage.setItem("user_name", name || data.user?.name || "Candidate");
+      // We save the email the user typed in
+      localStorage.setItem("email", email);
+
        // ✅ SIMPLIFIED Redirect by role
       if (role === "hr") {
-        nav("/hr/jobs");
+        nav("/hr/dashboard");
       } else {
-        nav("/candidate/dashboard"); // Direct access
+        nav("/candidate/dashboard");
       }
     } catch (err) {
       alert("Login failed: " + err.message);

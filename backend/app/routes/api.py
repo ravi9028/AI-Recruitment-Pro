@@ -1,16 +1,18 @@
 # backend/app/routes/api.py
 print("🔥 api.py has been loaded by Flask")
-from app.ai_engine import calculate_ai_score
+
+from app.ai_engine import calculate_ai_score, extract_text_from_pdf, extract_name_from_text
 from flask_mail import Message
 from app import mail
-from flask import Blueprint, request, jsonify,  current_app
+from flask import Blueprint, request, jsonify, current_app
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import db
-from app.models import User, Job, Candidate, Application,  CandidatePreference
+from app.models import User, Job, Candidate, Application, CandidatePreference
 from flask_jwt_extended import verify_jwt_in_request
 from flask_cors import cross_origin
 import os
 import uuid
+import json
 from werkzeug.utils import secure_filename
 from sqlalchemy import text
 from flask_jwt_extended import (
@@ -23,7 +25,7 @@ from flask_jwt_extended import (
 from datetime import timedelta
 
 # -------------------------------------------------------
-# BLUEPRINT — THIS MUST EXIST, backend crashed because it was removed
+# BLUEPRINT
 # -------------------------------------------------------
 api_bp = Blueprint("api", __name__)
 
@@ -32,33 +34,26 @@ ACCESS_EXPIRES = timedelta(hours=4)
 
 
 # -------------------------------------------------------
-# ROLE CHECK DECORATOR WITH DEBUG PRINTS
+# ROLE CHECK DECORATOR
 # -------------------------------------------------------
 def role_required(required_role):
     def wrapper(fn):
         @jwt_required()
         def inner(*args, **kwargs):
-            print("\n------ JWT DEBUG ------")
-
             try:
                 claims = get_jwt()
-                print("JWT CLAIMS:", claims)
             except Exception as e:
-                print("ERROR READING CLAIMS:", e)
                 return jsonify({"error": "Invalid token"}), 401
 
             user_role = claims.get("role")
-            print("EXTRACTED ROLE:", user_role)
-
             if user_role != required_role:
-                print("ROLE MISMATCH, DENIED")
                 return jsonify({"error": "Insufficient permissions"}), 403
 
-            print("ROLE MATCH — ALLOWING REQUEST")
             return fn(*args, **kwargs)
 
         inner.__name__ = fn.__name__
         return inner
+
     return wrapper
 
 
@@ -90,32 +85,55 @@ def register():
     user = User(email=email, password_hash=hashed, role=role)
     db.session.add(user)
     db.session.commit()
+
     if role == "candidate":
         new_candidate = Candidate(
             user_id=user.id,
             email=email,
-            name="New Candidate",  # Placeholder until they update it
+            name="New Candidate",
         )
         db.session.add(new_candidate)
-        db.session.commit()  # Now the 'bridge' exists before they ever login!
+        db.session.commit()
+
     return jsonify({"message": "User registered", "user_id": user.id}), 201
 
 
-@api_bp.route("/candidate/me", methods=["GET"])
+# -------------------------------------------------------
+# GET CANDIDATE PROFILE
+# -------------------------------------------------------
+@api_bp.route("/candidate/profile", methods=["GET"])
 @jwt_required()
 def get_current_candidate():
     user_id = get_jwt_identity()
     candidate = Candidate.query.filter_by(user_id=user_id).first()
+    user = User.query.get(user_id)
 
     if not candidate:
-        return jsonify({"error": "Profile not found"}), 404  # Triggers redirect to form
+        return jsonify({"error": "Profile not found"}), 404
+
+    # Safe Skills Loader
+    skills_data = candidate.skills
+    if isinstance(skills_data, str):
+        try:
+            skills_data = json.loads(skills_data)
+        except:
+            skills_data = [skills_data] if skills_data else []
 
     return jsonify({
         "id": candidate.id,
-        "name": candidate.name
+        "name": candidate.name,
+        "email": user.email,
+        "phone": candidate.phone,
+        "location": candidate.location,
+        "skills": skills_data,
+        "experience": candidate.experience,
+        "education": getattr(candidate, 'education', ""),
+        "resume": candidate.resume_url
     }), 200
+
+
 # -------------------------------------------------------
-# LOGIN (returns JWT containing role)
+# LOGIN
 # -------------------------------------------------------
 @api_bp.route("/login", methods=["POST"])
 def login():
@@ -131,17 +149,10 @@ def login():
     extra_claims = {"role": user.role, "email": user.email}
 
     token = create_access_token(
-        identity=str(user.id),  # FIX 1: force identity to string
+        identity=str(user.id),
         additional_claims=extra_claims,
         expires_delta=ACCESS_EXPIRES
     )
-
-    print("TOKEN IDENTITY SENT:", user.id)  # DEBUG
-
-    print("\n----- TOKEN DEBUG -----")
-    print("USER ROLE FROM DB:", user.role)
-    print("CLAIMS SENT IN TOKEN:", extra_claims)
-    print("------------------------\n")
 
     return jsonify({
         "message": "Login successful",
@@ -151,69 +162,76 @@ def login():
     }), 200
 
 
+# -------------------------------------------------------
+# CANDIDATE PROFILE UPDATE
+# -------------------------------------------------------
 @api_bp.route("/candidate/update", methods=["PUT"])
-@jwt_required()
-def update_profile():
-    user_id = get_jwt_identity()
-    candidate = Candidate.query.filter_by(user_id=user_id).first()
-
-    if not candidate:
-        return jsonify({"error": "Candidate not found"}), 404
-
-    data = request.json or {}
-    # Update only the fields that are sent
-    candidate.name = data.get("name", candidate.name)
-    candidate.phone = data.get("phone", candidate.phone)
-    candidate.location = data.get("location", candidate.location)
-    candidate.skills = data.get("skills", candidate.skills)
-    candidate.experience = data.get("experience", candidate.experience)
-    candidate.resume_url = data.get("resume_url", candidate.resume_url)
-
-    db.session.commit()
-    return jsonify({"message": "Profile updated successfully"}), 200
-
-
-@api_bp.route("/candidate/update", methods=["PUT"])
+@cross_origin()
 @jwt_required()
 def update_candidate_profile():
-    user_id = get_jwt_identity()
-    candidate = Candidate.query.filter_by(user_id=user_id).first()
+    try:
+        user_id = get_jwt_identity()
+        candidate = Candidate.query.filter_by(user_id=user_id).first()
 
-    if not candidate:
-        return jsonify({"error": "Candidate record not found"}), 404
+        if not candidate:
+            return jsonify({"error": "Candidate record not found"}), 404
 
-    data = request.get_json()
+        data = request.get_json()
 
-    # Update fields only if they are present in the request
-    candidate.name = data.get("name", candidate.name)
-    candidate.phone = data.get("phone", candidate.phone)
-    candidate.location = data.get("location", candidate.location)
-    candidate.skills = data.get("skills", candidate.skills)
-    candidate.experience = data.get("experience", candidate.experience)
-    candidate.resume_url = data.get("resume_url", candidate.resume_url)
+        candidate.name = data.get("name", candidate.name)
+        candidate.phone = data.get("phone", candidate.phone)
+        candidate.location = data.get("location", candidate.location)
+        candidate.experience = data.get("experience", candidate.experience)
 
-    db.session.commit()
-    return jsonify({"message": "Profile updated successfully"}), 200
+        if hasattr(candidate, 'education'):
+            candidate.education = data.get("education", getattr(candidate, 'education', ''))
+
+        new_skills = data.get("skills")
+        if new_skills is not None:
+            if isinstance(new_skills, list):
+                candidate.skills = json.dumps(new_skills)
+            else:
+                candidate.skills = new_skills
+
+        # Handle Resume Upload
+        resume_url = data.get("resume_url") or data.get("resume")
+
+        if resume_url:
+            candidate.resume_url = resume_url
+            filename = resume_url.split("/")[-1]
+            file_path = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
+
+            if os.path.exists(file_path):
+                try:
+                    text = extract_text_from_pdf(file_path)
+                    extracted_name = extract_name_from_text(text)
+
+                    current_name_clean = candidate.name.strip().lower()
+                    if current_name_clean in ["new candidate", "", "null"]:
+                        if extracted_name and extracted_name != "New Candidate":
+                            candidate.name = extracted_name
+                except Exception as e:
+                    print(f"⚠️ Extraction Warning: {e}")
+
+        db.session.commit()
+        return jsonify({"message": "Profile updated successfully", "name": candidate.name}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Database Error: {str(e)}"}), 500
+
+
 # -------------------------------------------------------
-# HR JOB CREATION (PROTECTED)
+# HR JOB CREATION
 # -------------------------------------------------------
-@api_bp.route("/jobs", methods=["POST"])
+@api_bp.route("/hr/create-job", methods=["POST"]) # <--- UPDATED TO MATCH FRONTEND
 @role_required("hr")
 def create_job():
-    print("\n---- JOB CREATE DEBUG ----")
-
     data = request.json
-    print("REQUEST JSON:", data)
-
     if not data:
         return jsonify({"error": "Empty or invalid JSON"}), 422
 
-    # 🔥 FIXED INDENTATION
     user_id = get_jwt_identity()
-    print("JWT IDENTITY RECEIVED:", user_id)
-
-    if not user_id:
-        return jsonify({"error": "No identity found"}), 422
 
     try:
         job = Job(
@@ -228,24 +246,16 @@ def create_job():
 
         db.session.add(job)
         db.session.commit()
-
-        print("JOB CREATED WITH ID:", job.id)
-
         return jsonify({"message": "Job Created", "job_id": job.id}), 201
 
     except Exception as e:
-        print("ERROR CREATING JOB:", str(e))
         db.session.rollback()
         return jsonify({"error": "Server failed", "details": str(e)}), 422
+
 
 @api_bp.route("/jobs/<int:job_id>", methods=["GET"])
 @jwt_required()
 def get_job(job_id):
-    claims = get_jwt()
-    # optional: allow hr/admin only if you want
-    # if claims.get('role') not in ['hr', 'admin']:
-    #     return jsonify({"error":"Unauthorized"}), 403
-
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
@@ -285,9 +295,11 @@ def get_jobs():
             "jd_file_url": j.jd_file_url,
             "created_by": j.created_by,
             "created_at": j.created_at.strftime("%Y-%m-%d %H:%M:%S") if j.created_at else None,
+            "application_count": len(j.applications) if j.applications else 0
         })
 
-    return jsonify({"jobs":job_list}), 200
+    return jsonify({"jobs": job_list}), 200
+
 
 # -------------------------------------------------------
 # UPDATE JOB (HR ONLY)
@@ -300,7 +312,6 @@ def update_job(job_id):
         return jsonify({"error": "Job not found"}), 404
 
     data = request.json or {}
-
     job.title = data.get("title", job.title)
     job.description = data.get("description", job.description)
     job.required_skills = data.get("required_skills", job.required_skills)
@@ -309,8 +320,8 @@ def update_job(job_id):
     job.jd_file_url = data.get("jd_file_url", job.jd_file_url)
 
     db.session.commit()
-
     return jsonify({"message": "Job updated successfully"}), 200
+
 
 # -------------------------------------------------------
 # DELETE JOB (HR ONLY)
@@ -324,10 +335,7 @@ def delete_job(job_id):
 
     db.session.delete(job)
     db.session.commit()
-
     return jsonify({"message": "Job deleted successfully"}), 200
-
-
 
 
 # -------------------------------------------------------
@@ -336,10 +344,9 @@ def delete_job(job_id):
 @api_bp.route("/candidates", methods=["POST"])
 @jwt_required()
 def create_candidate():
-    user_id = get_jwt_identity()  # Identity from the JWT token
+    user_id = get_jwt_identity()
     data = request.json or {}
 
-    # Check if a profile is already linked to this user
     existing = Candidate.query.filter_by(user_id=user_id).first()
     if existing:
         return jsonify({"message": "Candidate profile already exists", "id": existing.id}), 200
@@ -352,29 +359,19 @@ def create_candidate():
         experience=data.get("experience"),
         skills=data.get("skills"),
         resume_url=data.get("resume_url"),
-        user_id=user_id  # ✅ CRITICAL: Links the Candidate to the logged-in User
+        user_id=user_id
     )
 
     db.session.add(candidate)
     db.session.commit()
     return jsonify({"message": "Candidate profile created", "candidate_id": candidate.id}), 201
 
-# JOB APPLY KARNE KE LIYE YEH API USE KIYA HAI
-# @api_bp.route("/jobs/<int:job_id>/apply", methods=["OPTIONS"])
-# def apply_job_options(job_id):
-#     response = make_response()
-#     response.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
-#     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-#     response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-#     return response, 200
 
 # -------------------------------------------------------
-# APPLY JOB (Cleaned Version)
+# APPLY JOB
 # -------------------------------------------------------
-@api_bp.route("/jobs/<int:job_id>/apply", methods=["POST"]) # Removed OPTIONS
-# Removed @cross_origin (Global CORS in __init__.py handles this now)
+@api_bp.route("/jobs/<int:job_id>/apply", methods=["POST"])
 def apply_job(job_id):
-    # 1. Auth Check
     verify_jwt_in_request()
     user_id = get_jwt_identity()
 
@@ -382,12 +379,10 @@ def apply_job(job_id):
     if not candidate:
         return jsonify({"error": "Candidate not found"}), 404
 
-    # 2. Duplicate Check
     existing = Application.query.filter_by(job_id=job_id, candidate_id=candidate.id).first()
     if existing:
         return jsonify({"message": "Already applied"}), 409
 
-    # 3. Handle Resume (Required)
     resume = request.files.get("resume")
     if not resume:
         return jsonify({"error": "Resume is required"}), 400
@@ -398,74 +393,65 @@ def apply_job(job_id):
     resume.save(resume_path)
     resume_url = f"/api/upload/files/{unique_resume_name}"
 
-    # 4. Handle Video (Phase 7.1)
     video = request.files.get("video")
     video_url = None
+    video_path = None
 
     if video:
-        # Check file size manually if needed, but Nginx/Flask config usually handles it
         video_filename = secure_filename(video.filename)
         unique_video_name = f"{uuid.uuid4().hex}_{video_filename}"
         video_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_video_name)
         video.save(video_path)
         video_url = f"/api/upload/files/{unique_video_name}"
 
-    # ... (Video upload code is above this) ...
+    # AI SCORING
+    job = Job.query.get(job_id)
+    ai_score = 0
+    ai_feedback = ""
+    ai_graph = None
+    extracted_name = "New Candidate"
 
-    # 🚀 AI SCORING TRIGGER
-    # Get the job details to find required skills
-        # ... (After saving video to disk) ...
+    if job and job.required_skills and resume_path:
+        try:
+            ai_score, ai_feedback, ai_graph, extracted_name = calculate_ai_score(
+                resume_path,
+                video_path,
+                job.required_skills
+            )
+        except Exception as e:
+            print(f"⚠️ AI Engine Error: {e}")
 
-        # 🚀 AI SCORING TRIGGER
-        job = Job.query.get(job_id)
+    form_name = request.form.get("full_name")
+    final_name = form_name
+    if not final_name or final_name == "New Candidate" or final_name == "null":
+        final_name = extracted_name
 
-        ai_score = 0
-        ai_feedback = ""
-        ai_graph = None  # ➕ Initialize graph data as empty
+    application = Application(
+        job_id=job_id,
+        candidate_id=candidate.id,
+        full_name=final_name,
+        email=request.form.get("email"),
+        phone=request.form.get("phone"),
+        cover_letter=request.form.get("cover_letter"),
+        resume_url=resume_url,
+        video_url=video_url,
+        status="Applied",
+        score=ai_score,
+        feedback=ai_feedback,
+        graph_data=ai_graph
+    )
 
-        if job and job.required_skills and resume_path:
-            try:
-                # ✅ Capture 3 values: Score, Feedback, and the Graph Dictionary
-                ai_score, ai_feedback, ai_graph = calculate_ai_score(
-                    resume_path,
-                    video_path,
-                    job.required_skills
-                )
-                print(f"🤖 AI Score: {ai_score}% | Feedback: {ai_feedback}")
-            except Exception as e:
-                print(f"⚠️ AI Engine Error: {e}")
-
-        # 6. Save to Database with Graph Data
-        application = Application(
-            job_id=job_id,
-            candidate_id=candidate.id,
-            full_name=request.form.get("full_name"),
-            email=request.form.get("email"),
-            phone=request.form.get("phone"),
-            cover_letter=request.form.get("cover_letter"),
-            resume_url=resume_url,
-            video_url=video_url,
-            status="Applied",
-            score=ai_score,
-            feedback=ai_feedback,
-            graph_data=ai_graph  # ✅
-        )
-
-        db.session.add(application)
-        db.session.commit()
+    db.session.add(application)
+    db.session.commit()
     return jsonify({"message": "Applied successfully"}), 201
+
 
 # ------------------------------
 # Candidate Preferences Endpoints
 # ------------------------------
-
-# GET preferences for current user
 @api_bp.route("/candidate/preferences", methods=["GET"])
 @jwt_required()
 def get_preferences():
-    """
-    Returns the saved preferences for the logged-in candidate.
-    """
     user_id = get_jwt_identity()
     pref = CandidatePreference.query.filter_by(user_id=user_id).first()
     if not pref:
@@ -483,14 +469,10 @@ def get_preferences():
         }
     }), 200
 
-# POST: create or update preferences (idempotent)
+
 @api_bp.route("/candidate/preferences", methods=["POST"])
 @jwt_required()
 def create_or_update_preferences():
-    """
-    Create or update preferences for the logged-in user.
-    The frontend sends JSON with preferred_role, preferred_location, experience_level, expected_salary.
-    """
     user_id = get_jwt_identity()
     data = request.json or {}
 
@@ -501,7 +483,6 @@ def create_or_update_preferences():
 
     pref = CandidatePreference.query.filter_by(user_id=user_id).first()
     if not pref:
-        # Create
         pref = CandidatePreference(
             user_id=user_id,
             preferred_role=preferred_role,
@@ -511,17 +492,15 @@ def create_or_update_preferences():
         )
         db.session.add(pref)
     else:
-        # Update
         pref.preferred_role = preferred_role
         pref.preferred_location = preferred_location
         pref.experience_level = experience_level
         pref.expected_salary = expected_salary
 
     db.session.commit()
-
     return jsonify({"message": "Preferences saved", "preferences_id": pref.id}), 201
 
-# PATCH: update partial preferences (optional)
+
 @api_bp.route("/candidate/preferences", methods=["PATCH"])
 @jwt_required()
 def patch_preferences():
@@ -532,7 +511,6 @@ def patch_preferences():
     if not pref:
         return jsonify({"error": "Preferences not found"}), 404
 
-    # update fields if present
     for field in ("preferred_role", "preferred_location", "experience_level", "expected_salary"):
         if field in data:
             setattr(pref, field, data[field])
@@ -540,16 +518,10 @@ def patch_preferences():
     db.session.commit()
     return jsonify({"message": "Preferences updated"}), 200
 
-# public GET /api/jobs — returns all active jobs
+
 @api_bp.route("/jobs", methods=["GET"])
 def list_jobs():
-    """
-    Return all jobs. Public endpoint used by candidate dashboard.
-    Optionally supports query parameters for filtering later (q, location, skill).
-    """
-    # simple: return all jobs
     jobs = Job.query.order_by(Job.created_at.desc()).all()
-
     result = []
     for j in jobs:
         result.append({
@@ -563,13 +535,13 @@ def list_jobs():
             "created_by": j.created_by,
             "created_at": j.created_at.isoformat() if j.created_at else None,
         })
-
     return jsonify({"jobs": result}), 200
+
+
 @api_bp.route("/candidate/applications", methods=["GET"])
 @jwt_required()
 def get_candidate_applications():
     user_id = get_jwt_identity()
-
     candidate = Candidate.query.filter_by(user_id=user_id).first()
     if not candidate:
         return jsonify({"applications": []})
@@ -582,7 +554,10 @@ def get_candidate_applications():
                 j.location,
                 a.status,
                 a.created_at AS applied_at,
-                a.meeting_link  -- ➕ ADD THIS COLUMN TO FETCH FROM DB
+                a.meeting_link, 
+                a.score,       
+                a.feedback,  
+                a.graph_data
             FROM application a
             JOIN job j ON j.id = a.job_id
             WHERE a.candidate_id = :cid
@@ -590,45 +565,7 @@ def get_candidate_applications():
         """)
     result = db.session.execute(sql, {"cid": candidate.id})
     rows = [dict(row._mapping) for row in result]
-
     return jsonify({"applications": rows})
-
-
-# -------------------------------------------------------
-# HR – Get applicants for a specific job
-# -------------------------------------------------------
-@api_bp.route("/hr/jobs/<int:job_id>/applications", methods=["GET"])
-@jwt_required()
-@role_required("hr")
-def view_applicants(job_id):
-    # Fetching Applications, Candidates, and Users
-    rows = (
-        db.session.query(Application, Candidate, User)
-        .join(Candidate, Application.candidate_id == Candidate.id)
-        .join(User, Candidate.user_id == User.id)
-        .filter(Application.job_id == job_id)
-        .all()
-    )
-
-    data = []
-    for app, cand, user in rows:
-        is_flagged = "🚩" in (app.feedback or "")
-
-        data.append({
-            "application_id": app.id,
-            "full_name": app.full_name or cand.name or user.email,
-            "email": app.email or user.email,
-            "phone": app.phone,
-            "resume_url": app.resume_url,
-            "status": app.status,
-            "applied_at": app.created_at,
-            # ➕ ADD THESE THREE LINES FOR PHASE 8.2 [cite: 27-30]
-            "score": app.score,
-            "feedback": app.feedback,
-            "graph_data": app.graph_data
-        })
-
-    return jsonify({"applications": data}), 200
 
 
 @api_bp.route("/hr/applications/<int:app_id>/status", methods=["PATCH"])
@@ -644,63 +581,165 @@ def update_application_status(app_id):
     app_record = Application.query.get_or_404(app_id)
     app_record.status = new_status
 
-    # 🚀 PHASE 9.1: GENERATE UNIQUE INTERVIEW LINK
-    meeting_info = ""
     if new_status == "Shortlisted":
-        # uuid is already imported at top of your file
         unique_room = f"Interview-{app_id}-{uuid.uuid4().hex[:6]}"
         app_record.meeting_link = f"https://meet.jit.si/{unique_room}"
-        meeting_info = f"\n\nYour Interview Link: {app_record.meeting_link}"
-    elif new_status == "Rejected":
-        meeting_info = f"\n\nLog in to your dashboard to view your detailed AI feedback."
 
     try:
         db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Database Commit Failed", "details": str(e)}), 500
 
-        # Notification Logic [cite: 35-36]
+    email_body = ""
+    if new_status == "Shortlisted":
+        email_body = (
+            f"Hello {app_record.full_name},\n\n"
+            f"Congratulations! You have been Shortlisted for the interview.\n"
+            f"Your Interview Link: {app_record.meeting_link}\n\n"
+            f"Best Regards,\nHR Team"
+        )
+    elif new_status == "Rejected":
+        email_body = (
+            f"Hello {app_record.full_name},\n\n"
+            f"Thank you for your interest. Unfortunately, we are not moving forward with your application.\n\n"
+            f"💡 AI FEEDBACK AVAILABLE: We have generated a detailed analysis of your resume.\n"
+            f"Please log in to your dashboard to view your 'Skill Gap Analysis' and see exactly where you lagged.\n\n"
+            f"Best Regards,\nHR Team"
+        )
+
+    try:
         msg = Message(
-            subject="Application Status Update",
+            subject=f"Application Status Update: {new_status}",
             recipients=[app_record.email],
-            body=(
-                f"Hello {app_record.full_name},\n\n"
-                f"Your status has been updated to: {new_status}."
-                f"{meeting_info}\n\n"
-                f"Best Regards,\nHR Team"
-            )
+            body=email_body
         )
         mail.send(msg)
-
-        return jsonify({
-            "message": "Status updated successfully",
-            "meeting_link": app_record.meeting_link
-        }), 200
-
-
     except Exception as e:
+        print(f"⚠️ Email failed (Ignored): {e}")
 
-        db.session.rollback()
+    return jsonify({
+        "message": "Status updated successfully",
+        "meeting_link": app_record.meeting_link
+    }), 200
 
-        print(f"❌ ERROR: {str(e)}")
-
-        return jsonify({"error": str(e)}), 500
-
-    # 🚩 PHASE 9.3: FLAG SUSPICIOUS ACTIVITY (Aligned to the left margin) [cite: 44-48]
 
 @api_bp.route("/applications/<int:app_id>/flag", methods=["POST"])
 @jwt_required()
 def flag_application(app_id):
-
     data = request.get_json()
     reason = data.get("reason", "Suspicious activity detected")
     app_record = Application.query.get_or_404(app_id)
-    # Update the feedback to include the red flag for HR [cite: 48]
 
     existing_feedback = app_record.feedback or ""
-
     app_record.feedback = f"{existing_feedback}\n🚩 ALERT: {reason}".strip()
 
     db.session.commit()
-
-    print(f"🚩 Phase 9.3: Incident logged for Application {app_id}: {reason}")
-
     return jsonify({"message": "Incident flagged"}), 200
+
+
+# -------------------------------------------------------
+# ✅ THE FIX: DOUBLE ROUTE (Accepts both URL styles)
+# -------------------------------------------------------
+@api_bp.route("/hr/jobs/<int:job_id>/applicants", methods=["GET"]) # Style 1
+@api_bp.route("/jobs/<int:job_id>/applicants", methods=["GET"])    # Style 2 (Alias)
+@cross_origin()
+def get_job_applicants(job_id):
+    try:
+        print(f"🔎 Fetching applicants for Job ID: {job_id}")
+
+        results = db.session.query(Application, Candidate, User) \
+            .outerjoin(Candidate, Application.candidate_id == Candidate.id) \
+            .outerjoin(User, Candidate.user_id == User.id) \
+            .filter(Application.job_id == job_id).all()
+
+        applicants_list = []
+        for app, cand, user in results:
+            # Handle cases where User/Candidate might be None (safety check)
+            candidate_name = app.full_name or (cand.name if cand else "Unknown")
+            candidate_email = app.email or (user.email if user else "No Email")
+
+            # Safe Skills Parsing
+            cand_skills = []
+            if cand and cand.skills:
+                try:
+                    if isinstance(cand.skills, list):
+                        cand_skills = cand.skills
+                    elif isinstance(cand.skills, str):
+                        cand_skills = json.loads(cand.skills)
+                except:
+                    cand_skills = [str(cand.skills)]
+
+            applicants_list.append({
+                "id": app.id,
+                "ai_score": app.score or 0,
+                "ai_feedback": app.feedback or "No feedback yet.",
+                "status": app.status,
+                "resume_url": app.resume_url,
+                "user": {
+                    "name": candidate_name,
+                    "email": candidate_email,
+                    "phone": cand.phone if cand else "N/A",
+                    "location": cand.location if cand else "N/A",
+                    "experience": cand.experience if cand else "No experience listed.",
+                    "education": getattr(cand, 'education', "No education listed."),
+                    "skills": cand_skills
+                }
+            })
+
+        print(f"✅ Found {len(applicants_list)} applicants.")
+        return jsonify({"applicants": applicants_list}), 200
+
+    except Exception as e:
+        print(f"🔥 ERROR in /applicants route: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# -------------------------------------------------------
+# 🤖 RECRUITER CO-PILOT (AI CHATBOT) - UPGRADED & SAFE
+# -------------------------------------------------------
+@api_bp.route("/chat", methods=["POST"])
+@cross_origin()
+def chat_bot():
+    try:
+        data = request.json or {}
+        user_message = data.get("message", "").lower()
+
+        # 🟢 CO-PILOT LOGIC: Helping the Recruiter Work
+
+        # 1. NAVIGATION ASSISTANCE
+        if "post" in user_message or "create job" in user_message:
+            reply = "To post a job, click 'Post New Job' in the left sidebar. You'll need the JD file and a list of required skills."
+
+        elif "dashboard" in user_message or "home" in user_message:
+            reply = "You are currently on the Dashboard. This gives you a bird's-eye view of active jobs and recent applications."
+
+        elif "applicants" in user_message or "candidates" in user_message or "see" in user_message:
+            reply = "To see candidates: Go to 'Job Inventory', click on any Job Card, and you will see the AI-ranked list of applicants."
+
+        # 2. FEATURE EXPLANATION
+        elif "score" in user_message or "ranking" in user_message or "ai" in user_message:
+            reply = "The AI Score (0-100%) shows how well a resume matches the job description. Higher scores mean better skill overlap."
+
+        elif "export" in user_message or "download" in user_message or "report" in user_message:
+            reply = "You can download full reports from the 'Talent Intelligence' tab. Look for the 'Export CSV' button."
+
+        # 3. ACTION ASSISTANCE
+        elif "shortlist" in user_message or "interview" in user_message:
+            reply = "To schedule an interview: Open a candidate's profile and click 'Shortlist'. I will automatically generate a video meeting link and email them."
+
+        elif "delete" in user_message or "remove" in user_message:
+            reply = "For security, only Admin Level 1 users can delete data. Please use the 'Danger Zone' in Settings if you have permission."
+
+        # 4. GREETINGS & FALLBACK
+        elif "hello" in user_message or "hi" in user_message:
+            reply = "Hello! I am your RecruitPro Co-Pilot. I can help you navigate the portal. Try asking: 'How do I post a job?' or 'Where are the applicants?'"
+
+        else:
+            reply = "I am trained to help you navigate RecruitPro. Try asking about 'Posting Jobs', 'Screening Candidates', or 'Exporting Data'."
+
+        return jsonify({"reply": reply}), 200
+
+    except Exception as e:
+        print(f"CHAT ERROR: {e}")
+        return jsonify({"reply": "I'm having trouble connecting to the server. Please try again."}), 500
+    
