@@ -13,35 +13,46 @@ export default function InterviewRoom() {
   const [model, setModel] = useState(null);
   const [lastFlagTime, setLastFlagTime] = useState(0);
 
-  // 🚀 Phase 9.3.2: Flagging Logic
-  const flagSuspiciousActivity = async (reason) => {
+  // 🚀 AUTOMATED FLAGGING LOGIC (Sends Data to Backend)
+  const flagSuspiciousActivity = async (type, reason) => {
     const now = Date.now();
-    // 🛡️ Cooldown: Only send one alert every 20 seconds
-    if (now - lastFlagTime < 20000) return;
+    // 🛡️ Cooldown: Prevent spamming the API (limit 1 alert per 5 seconds for visuals)
+    if (now - lastFlagTime < 5000) return;
 
     try {
       setLastFlagTime(now);
+      // Extract Application ID from Room Name (e.g., "Interview-15-xyz" -> "15")
       const appId = roomName.split('-')[1];
+
       await fetch(`http://localhost:5000/api/applications/${appId}/flag`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ reason: reason })
+        body: JSON.stringify({
+            type: type,   // "tab_switch", "multiple_faces", etc.
+            reason: reason
+        })
       });
-      console.log(`🚩 Incident Logged: ${reason}`);
+      console.log(`🚩 Sent Alert: ${reason}`);
     } catch (err) {
       console.error("Flagging failed", err);
     }
   };
 
-  // 🛡️ PHASE 9.3.1: Tab-Switching Detection
+  // 🛡️ 1. DETECT TAB SWITCHING
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden && window.location.pathname.includes('interview')) {
-        alert("SECURITY ALERT: Tab switching is monitored.");
-        flagSuspiciousActivity("Tab Switched during interview");
+      if (document.hidden) {
+        // Immediate Alert (No Cooldown for Tab Switching)
+        const appId = roomName.split('-')[1];
+        fetch(`http://localhost:5000/api/applications/${appId}/flag`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ type: "tab_switch", reason: "Candidate switched tabs" })
+        });
+        alert("⚠️ WARNING: Tab switching is monitored. Your trust score has been reduced.");
       }
     };
 
@@ -49,10 +60,9 @@ export default function InterviewRoom() {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [roomName]);
+  }, [roomName, token]);
 
-  // 🤖 PHASE 9.3.2: AI Vision & Audio Proctoring (Combined)
-// 🤖 PHASE 9.3.2: AI Vision & Audio Proctoring (Coaching Detection)
+  // 🤖 2. AI PROCTORING (Vision & Audio)
   useEffect(() => {
     let detectionInterval;
     let stream;
@@ -67,18 +77,18 @@ export default function InterviewRoom() {
         setModel(loadedModel);
         console.log("✅ AI Proctoring Model Loaded");
 
-        // Setup hidden video for AI
+        // Setup hidden video for AI analysis
         const video = document.createElement('video');
         video.style.display = 'none';
         video.muted = true;
         video.width = 640;
         video.height = 480;
 
-        // 🎤 1. Request Audio & Video
+        // Request Access
         stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         video.srcObject = stream;
 
-        // 🎤 2. Setup Audio Analysis
+        // Audio Analysis Setup
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const analyser = audioContext.createAnalyser();
         const microphone = audioContext.createMediaStreamSource(stream);
@@ -110,28 +120,26 @@ export default function InterviewRoom() {
 
               // 🚩 C. ENHANCED SECURITY LOGIC
 
-              // 1. Visual: Cheating (More than 1 person)
+              // 1. Multiple People Detected
               if (persons.length > 1) {
-                flagSuspiciousActivity("Visual: Multiple persons detected");
+                flagSuspiciousActivity("multiple_faces", "Visual: Multiple persons detected");
               }
-              // 2. Visual: Cheating (No Candidate)
+              // 2. No Person Detected (Candidate Left)
               else if (persons.length === 0) {
                 if (volume > 20) {
-                   flagSuspiciousActivity("Critical: Audio detected while candidate missing (Proxy Suspected)");
+                   flagSuspiciousActivity("no_face", "Critical: Audio detected while candidate missing (Proxy Suspected)");
                 } else {
-                   flagSuspiciousActivity("Visual: No candidate detected");
+                   flagSuspiciousActivity("no_face", "Visual: No candidate detected");
                 }
               }
-              // 3. Audio: Coaching (1 Person + Sound) - NEW FEATURE 🚀
+              // 3. Audio Coaching (1 Person + High Volume)
               else if (persons.length === 1) {
-                 // If volume is significant, it could be the candidate speaking OR coaching.
-                 // We flag it so HR can verify the timestamp later.
-                 if (volume > 40) { // Threshold 40 = distinct talking
-                    flagSuspiciousActivity("Audio: High conversation volume (Potential Coaching)");
+                 if (volume > 40) {
+                    flagSuspiciousActivity("multiple_voices", "Audio: High conversation volume (Potential Coaching)");
                  }
               }
             }
-          }, 5000);
+          }, 5000); // Check every 5 seconds
         };
       } catch (err) {
         console.error("AI Camera/Mic access failed:", err);
@@ -140,43 +148,34 @@ export default function InterviewRoom() {
 
     startProctoring();
 
-    // 🛑 CLEANUP
+    // Cleanup
     return () => {
       isMounted = false;
-      console.log("🛑 Stopping Proctoring...");
       if (detectionInterval) clearInterval(detectionInterval);
       if (audioContext && audioContext.state !== 'closed') audioContext.close();
       if (stream) {
-        stream.getTracks().forEach(track => {
-          track.stop();
-          track.enabled = false;
-        });
+        stream.getTracks().forEach(track => { track.stop(); });
       }
     };
-  }, []);
+  }, [roomName]); // Added dependencies to ensure it runs correctly on room change
 
   return (
     <div className="h-screen w-full bg-slate-900 flex flex-col font-sans">
-      {/* 📱 MOBILE-RESPONSIVE SECURITY HEADER */}
+      {/* HEADER */}
       <div className="p-2 md:p-4 bg-slate-800 text-white flex justify-between items-center shadow-xl border-b border-slate-700">
-
-        {/* Left Side: Logo & Badge */}
         <div className="flex items-center gap-2 md:gap-4">
           <h2 className="text-sm md:text-lg font-bold uppercase tracking-tight hidden sm:block">
             AI Recruitment Pro
           </h2>
-
-          {/* Compact Badge for Mobile */}
           <div className="flex items-center gap-2 bg-slate-900 px-2 md:px-3 py-1 rounded-full border border-green-500/30">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
             <span className="text-[9px] md:text-[10px] text-green-400 font-mono uppercase font-bold tracking-widest">
-              <span className="md:hidden">Active</span> {/* Short text for mobile */}
-              <span className="hidden md:inline">AI Proctoring Active</span> {/* Full text for PC */}
+              <span className="md:hidden">Active</span>
+              <span className="hidden md:inline">AI Proctoring Active</span>
             </span>
           </div>
         </div>
 
-        {/* Right Side: Button */}
         <button
           onClick={() => navigate('/candidate/dashboard')}
           className="px-3 md:px-6 py-1.5 md:py-2 bg-red-600 hover:bg-red-700 text-white text-[10px] md:text-xs font-bold rounded shadow-md active:scale-95 whitespace-nowrap"
@@ -185,6 +184,7 @@ export default function InterviewRoom() {
         </button>
       </div>
 
+      {/* JITSI MEETING */}
       <div className="flex-grow relative bg-black">
         <JitsiMeeting
           domain="meet.jit.si"

@@ -8,7 +8,7 @@ export default function EditJobSidebar({ job, open, onClose, onSave }) {
     location: "",
     experience_required: "",
     salary_range: "", // Added Salary field
-    job_description_file: ""
+    job_description_file: "" // Can hold URL string (existing) or File object (new)
   });
 
   // Load job data when the sidebar opens
@@ -31,6 +31,14 @@ export default function EditJobSidebar({ job, open, onClose, onSave }) {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  // 🟢 NEW: Handle File Selection
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setFormData({ ...formData, job_description_file: file });
+    }
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     onSave(formData);
@@ -41,21 +49,21 @@ export default function EditJobSidebar({ job, open, onClose, onSave }) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* 1. Backdrop (Click to close) */}
-      <div 
+      <div
         className="absolute inset-0 bg-black/30 backdrop-blur-sm transition-opacity"
         onClick={onClose}
       ></div>
 
       {/* 2. Sidebar Panel */}
       <div className="relative w-full max-w-md bg-white shadow-2xl h-full flex flex-col animate-slide-in-right">
-        
+
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
           <div>
             <h2 className="text-lg font-bold text-slate-800">Edit Job Details</h2>
             <p className="text-xs text-slate-500">Update the job posting information</p>
           </div>
-          <button 
+          <button
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 transition"
           >
@@ -65,7 +73,7 @@ export default function EditJobSidebar({ job, open, onClose, onSave }) {
 
         {/* Scrollable Form Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          
+
           {/* Job Title */}
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Job Title</label>
@@ -144,17 +152,37 @@ export default function EditJobSidebar({ job, open, onClose, onSave }) {
             />
           </div>
 
-          {/* JD File URL */}
+          {/* 🟢 JD File Upload (Replaced Text Input) */}
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">JD Document URL (Optional)</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">JD Document (Upload)</label>
+
+            {/* Show existing URL if it exists (as a string) */}
+            {typeof formData.job_description_file === 'string' && formData.job_description_file && (
+               <div className="mb-2 flex items-center gap-2 text-xs bg-blue-50 p-2 rounded border border-blue-100 text-blue-700">
+                  <span className="text-lg">📄</span>
+                  <div className="flex-1 truncate">
+                    <span className="font-bold">Current: </span>
+                    <a href={formData.job_description_file} target="_blank" rel="noreferrer" className="underline truncate">
+                      View Document
+                    </a>
+                  </div>
+               </div>
+            )}
+
             <input
-              type="text"
+              type="file"
               name="job_description_file"
-              value={formData.job_description_file}
-              onChange={handleChange}
-              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none text-slate-600 text-sm"
-              placeholder="https://..."
+              onChange={handleFileChange}
+              accept=".pdf,.doc,.docx"
+              className="w-full text-sm text-slate-500
+                file:mr-4 file:py-2.5 file:px-4
+                file:rounded-lg file:border-0
+                file:text-xs file:font-bold
+                file:bg-blue-600 file:text-white
+                hover:file:bg-blue-700
+                cursor-pointer border border-slate-200 rounded-lg bg-slate-50 transition"
             />
+            <p className="text-[10px] text-slate-400 mt-1">Accepted: PDF, DOC, DOCX. Uploading overrides the current file.</p>
           </div>
 
         </div>

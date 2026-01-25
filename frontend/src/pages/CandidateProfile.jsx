@@ -99,6 +99,8 @@ export default function CandidateProfile() {
   };
 
   // 2️⃣ FETCH PROFILE
+  // 🟢 LOAD PROFILE DATA (FIXED PARSING)
+  // 2️⃣ FETCH PROFILE (FIXED for Single State Object)
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -107,42 +109,42 @@ export default function CandidateProfile() {
         });
         const data = await res.json();
 
-        // Safe Skills Parsing
-        let parsedSkills = [];
-        if (Array.isArray(data.skills)) {
-            parsedSkills = data.skills;
-        } else if (typeof data.skills === "string") {
+        if (res.ok) {
+          // 🛠️ FIX: Robust Skills Parsing
+          let loadedSkills = [];
+          if (Array.isArray(data.skills)) {
+            loadedSkills = data.skills;
+          } else if (typeof data.skills === "string") {
             try {
-                parsedSkills = JSON.parse(data.skills);
-            } catch {
-                parsedSkills = data.skills.split(",").map(s => s.trim()).filter(Boolean);
+              const parsed = JSON.parse(data.skills);
+              if (Array.isArray(parsed)) loadedSkills = parsed;
+            } catch (e) {
+              loadedSkills = data.skills.split(",").map(s => s.trim()).filter(s => s);
             }
-        }
+          }
 
-        setProfile({
-            ...data,
-            skills: parsedSkills || [],
-            resume: null,
-            resume_url: data.resume_url || data.resume || "",
+          // 🟢 ACTION: Update the 'profile' object directly
+          setProfile((prev) => ({
+            ...prev, // Keep existing fields (like github/linkedin if set locally)
             name: data.name || "",
-            email: data.email || "",
+            email: data.email || "", // API returns email from User table
             phone: data.phone || "",
             location: data.location || "",
             experience: data.experience || "",
             education: data.education || "",
-            github: data.github || "",
-            linkedin: data.linkedin || "",
-        });
+            resume_url: data.resume || "", // API returns 'resume' key for the URL
+            skills: Array.isArray(data.skills) ? data.skills : []
+          }));
+        }
       } catch (err) {
         console.error("Failed to load profile", err);
-        showToast("Failed to load profile data", "error");
       } finally {
         setLoading(false);
       }
     };
+
     fetchProfile();
   }, [token]);
-
   // 3️⃣ SMART SAVE HANDLER (Safe & Stable)
   const handleUpdate = async (e) => {
     e.preventDefault();
