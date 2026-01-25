@@ -26,11 +26,12 @@ class Job(db.Model):
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
 
-    required_skills = db.Column(db.String(300), nullable=True)
+    required_skills = db.Column(db.Text, nullable=True)
     location = db.Column(db.String(100), nullable=True)
     experience_required = db.Column(db.String(100), nullable=True)
 
-    jd_file_url = db.Column(db.String(300), nullable=True)
+    salary_range = db.Column(db.String(100), nullable=True)
+    jd_upload = db.Column(db.String(300), nullable=True)
 
     created_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=db.func.now())
@@ -56,7 +57,8 @@ class Candidate(db.Model):
 
     location = db.Column(db.String(100), nullable=True)
     experience = db.Column(db.String(100), nullable=True)
-    skills = db.Column(db.String(500), nullable=True)
+    education = db.Column(db.Text, nullable=True)
+    skills = db.Column(db.Text, nullable=True)
 
     resume_url = db.Column(db.String(300), nullable=True)
     video_url = db.Column(db.String(300), nullable=True)
@@ -92,7 +94,11 @@ class Application(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     meeting_link = db.Column(db.String(255), nullable=True)
-
+# These columns save the malpractice warnings permanently in the DB
+    trust_score = db.Column(db.Integer, default=100)  # Starts at 100%
+    tab_switches = db.Column(db.Integer, default=0)
+    faces_detected = db.Column(db.String(50), default="Single Face")
+    voices_detected = db.Column(db.String(50), default="Single Voice")
 class CandidatePreference(db.Model):
     """
     SQLAlchemy model for candidate_preferences table.
