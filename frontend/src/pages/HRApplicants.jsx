@@ -58,7 +58,7 @@ export default function HRApplicants() {
     }
   };
 
-  // 🟢 FIXED: Now accepts dynamic status (Shortlisted OR Rejected)
+  // 🟢 FIXED: Now accepts dynamic status (Shortlisted, Rejected, or Hired)
   const handleStatusUpdate = async (appId, newStatus) => {
     // Optimistic UI Update
     setApplicants(prev => prev.map(app =>
@@ -115,18 +115,56 @@ export default function HRApplicants() {
       return "bg-red-50 text-red-700 border-red-200 animate-pulse";
   };
 
-  // 🟢 NEW: Renders Reject AND Shortlist Buttons
+  // 🟢 UPDATED: Renders Logic for Shortlisted (Interview) -> Hired
   const renderActionButtons = (app, isPrimary = false) => {
-      // 1. ALREADY SHORTLISTED
+
+      // 1. STATUS: SHORTLISTED (Interview Phase)
+      // Show Interview Link + Final Decision Buttons
       if (app.status === "Shortlisted") {
           return (
-              <button disabled className={`px-4 py-2 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg border border-emerald-200 cursor-not-allowed flex items-center gap-2 justify-center ${isPrimary ? 'w-full py-3' : ''}`}>
-                  <span>✅ Shortlisted</span>
+              <div className={`flex flex-col gap-2 ${isPrimary ? 'w-full' : ''}`}>
+
+                  {/* A. INTERVIEW LINK (The Blue Button) */}
+                  {app.meeting_link && (
+                      <a
+                        href={app.meeting_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full px-4 py-3 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 shadow-md flex items-center gap-2 justify-center transition animate-pulse"
+                      >
+                          🎥 Join Interview Room
+                      </a>
+                  )}
+
+                  {/* B. FINAL DECISION BUTTONS (Hire vs Reject) */}
+                  <div className="flex gap-2">
+                      <button
+                          onClick={() => handleStatusUpdate(app.id, "Rejected")}
+                          className="flex-1 px-3 py-2 bg-white border border-red-200 text-red-500 hover:bg-red-50 text-xs font-bold rounded-lg transition"
+                      >
+                          Reject
+                      </button>
+                      <button
+                          onClick={() => handleStatusUpdate(app.id, "Hired")}
+                          className="flex-[2] px-3 py-2 bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg text-xs font-bold rounded-lg transition"
+                      >
+                          🤝 Hire Candidate
+                      </button>
+                  </div>
+              </div>
+          );
+      }
+
+      // 2. STATUS: HIRED (Final State)
+      if (app.status === "Hired") {
+          return (
+              <button disabled className={`px-4 py-3 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg border border-emerald-200 cursor-not-allowed flex items-center gap-2 justify-center ${isPrimary ? 'w-full' : ''}`}>
+                  <span>🎉 Hired Successfully</span>
               </button>
           );
       }
 
-      // 2. ALREADY REJECTED
+      // 3. STATUS: REJECTED
       if (app.status === "Rejected") {
           return (
               <button disabled className={`px-4 py-2 bg-red-100 text-red-700 text-xs font-bold rounded-lg border border-red-200 cursor-not-allowed flex items-center gap-2 justify-center ${isPrimary ? 'w-full py-3' : ''}`}>
@@ -135,7 +173,7 @@ export default function HRApplicants() {
           );
       }
 
-      // 3. PENDING ACTIONS (Reject | Shortlist)
+      // 4. STATUS: APPLIED (Initial State - Reject | Shortlist)
       return (
           <div className={`flex gap-2 ${isPrimary ? 'w-full' : ''}`}>
              {/* REJECT BUTTON */}
@@ -233,7 +271,6 @@ export default function HRApplicants() {
 
                     <div className="flex gap-3">
                          <button onClick={() => setSelectedCandidate(applicants[0])} className="flex-1 py-3 bg-slate-50 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-100 transition">Profile</button>
-                         {/* 🟢 Replaced with new action buttons */}
                          <div className="flex-[2]">
                             {renderActionButtons(applicants[0], true)}
                          </div>
@@ -275,7 +312,7 @@ export default function HRApplicants() {
         {/* 3. LIST VIEW */}
         <div className="space-y-4">
            {applicants.map((app, index) => (
-             <div key={app.id} className={`group relative bg-white p-5 rounded-2xl border transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 ${app.status === "Shortlisted" ? "border-emerald-200 bg-emerald-50/10" : app.status === "Rejected" ? "border-red-200 bg-red-50/10" : "border-slate-100"}`}>
+             <div key={app.id} className={`group relative bg-white p-5 rounded-2xl border transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 ${app.status === "Shortlisted" ? "border-emerald-200 bg-emerald-50/10" : app.status === "Rejected" ? "border-red-200 bg-red-50/10" : app.status === "Hired" ? "border-emerald-500 bg-emerald-100/20" : "border-slate-100"}`}>
                 <div className="flex flex-col md:flex-row gap-6 items-center">
                     <div className="hidden md:flex flex-col items-center justify-center w-12 flex-shrink-0 text-slate-300"><span className="text-xl font-black">#{index + 1}</span></div>
 
@@ -310,7 +347,7 @@ export default function HRApplicants() {
            ))}
         </div>
 
-        {/* 4. MODAL (No Changes needed) */}
+        {/* 4. MODAL */}
         {selectedCandidate && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-slate-50 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto relative">
