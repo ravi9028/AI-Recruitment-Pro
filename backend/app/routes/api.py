@@ -1,6 +1,8 @@
 # backend/app/routes/api.py
 print("🔥 api.py has been loaded by Flask")
 
+# Add this at the top with your other imports
+from pdfminer.high_level import extract_text
 from app.ai_engine import calculate_ai_score, extract_text_from_pdf, extract_name_from_text
 from flask_mail import Message
 from app import mail
@@ -221,6 +223,51 @@ def update_candidate_profile():
         return jsonify({"error": str(e)}), 500
 
 
+# In backend/app/routes/api.py
+
+# In backend/app/routes/api.py
+
+@api_bp.route("/hr/parse-jd", methods=["POST"])
+@cross_origin()
+@jwt_required()
+def parse_jd():
+    temp_path = None
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+
+        filename = secure_filename(file.filename)
+        temp_path = os.path.join(current_app.config["UPLOAD_FOLDER"], f"temp_{uuid.uuid4().hex}_{filename}")
+        file.save(temp_path)
+
+        # 🟢 BYPASS THE HELPER: Use pdfminer directly to get RAW text
+        # This ensures no spaces are stripped by your other functions
+        raw_text = extract_text(temp_path)
+
+        # 🟢 FORCE SPACING: Convert newlines to spaces
+        # This turns "Developer\nJob" -> "Developer Job"
+        clean_text = raw_text.replace('\n', ' ').replace('\r', ' ')
+
+        # Remove multiple spaces
+        final_text = " ".join(clean_text.split())
+
+        # Cleanup
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        return jsonify({
+            "extractedText": final_text,
+            "message": "Parsed successfully"
+        }), 200
+
+    except Exception as e:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+        return jsonify({"error": str(e)}), 500
 # -------------------------------------------------------
 # HR JOB CREATION - MANUALLY SECURED (CORS SAFE)
 # -------------------------------------------------------
@@ -421,16 +468,25 @@ def update_job(job_id):
 # DELETE JOB (HR ONLY)
 # -------------------------------------------------------
 @api_bp.route("/jobs/<int:job_id>", methods=["DELETE"])
+@cross_origin()  # 🟢 Add this to prevent CORS errors on DELETE
 @role_required("hr")
 def delete_job(job_id):
     job = Job.query.get(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
 
-    db.session.delete(job)
-    db.session.commit()
-    return jsonify({"message": "Job deleted successfully"}), 200
+    try:
+        # 🟢 FIX: Manually delete applications first (Cascade Delete)
+        Application.query.filter_by(job_id=job.id).delete()
 
+        # Now delete the job
+        db.session.delete(job)
+        db.session.commit()
+        return jsonify({"message": "Job and associated applications deleted successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 # -------------------------------------------------------
 # CREATE CANDIDATE
@@ -499,22 +555,37 @@ def apply_job(job_id):
         video.save(video_path)
         video_url = f"/api/upload/files/{unique_video_name}"
 
-    # --- AI SCORING ---
-    job = Job.query.get(job_id)
-    ai_score = 0
-    ai_feedback = "AI scoring failed or skipped."
-    ai_graph = None
-    extracted_name = "New Candidate"
+        # --- AI SCORING (FIXED) ---
+        job = Job.query.get(job_id)
+        ai_score = 0
+        ai_feedback = "AI scoring failed or skipped."
+        ai_graph = None
+        extracted_name = "New Candidate"
 
-    if job and job.required_skills and resume_path:
-        try:
-            ai_score, ai_feedback, ai_graph, extracted_name = calculate_ai_score(
-                resume_path,
-                video_path,
-                job.required_skills
-            )
-        except Exception as e:
-            print(f"🔥 AI ENGINE CRASHED: {e}")
+        if job and job.required_skills and resume_path:
+            try:
+                # 🟢 1. CLEAN THE SKILLS (Convert String -> List)
+                skills_for_ai = []
+
+                raw_skills = job.required_skills
+
+                # Check if it's JSON format (e.g., '["Java", "Python"]')
+                try:
+                    skills_for_ai = json.loads(raw_skills)
+                except:
+                    # If not JSON, assume comma-separated (e.g., "Java, Python")
+                    if isinstance(raw_skills, str):
+                        skills_for_ai = [s.strip() for s in raw_skills.split(",") if s.strip()]
+
+                # 🟢 2. PASS THE LIST TO AI ENGINE
+                # (Now the AI receives ["LAN configuration", "Laptop setup"] correctly)
+                ai_score, ai_feedback, ai_graph, extracted_name = calculate_ai_score(
+                    resume_path,
+                    video_path,
+                    skills_for_ai
+                )
+            except Exception as e:
+                print(f"🔥 AI ENGINE CRASHED: {e}")
 
     form_name = request.form.get("full_name")
     final_name = form_name

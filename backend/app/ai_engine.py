@@ -3,7 +3,8 @@ import os
 import PyPDF2
 import speech_recognition as sr
 from moviepy.editor import VideoFileClip
-from thefuzz import fuzz  # 🟢 NEW: Handles spelling mistakes
+from thefuzz import fuzz  # Handles spelling mistakes
+from pdfminer.high_level import extract_text  # 🟢 NEW: The Fix for "No Spaces"
 
 # ---------------------------------------------------------
 # 🧠 INTELLIGENT SKILL MAPPING (The Brain)
@@ -23,17 +24,30 @@ SYNONYM_DB = {
 
 
 def extract_text_from_pdf(pdf_path):
-    text = ""
+    """
+    🟢 FIXED VERSION: Uses pdfminer to ensure spaces are preserved.
+    Replaces the old PyPDF2 logic that was deleting spaces.
+    """
     try:
-        with open(pdf_path, 'rb') as f:
-            reader = PyPDF2.PdfReader(f)
-            for page in reader.pages:
-                text += page.extract_text() + " "
+        # 1. Extract Raw Text using the robust library
+        text = extract_text(pdf_path)
+
+        # 2. Fix Spacing (Convert newlines to spaces)
+        # This turns "Java\nDeveloper" into "Java Developer"
+        text = text.replace('\n', ' ').replace('\r', ' ')
+
+        # 3. Basic Cleanup (Remove multi-spaces, keep special chars like + and #)
+        # We keep . + # - to support "C++", "C#", "Node.js", "React-Native"
+        # The old regex [^a-z0-9] was deleting C++ and C#
+        text = re.sub(r'[^a-zA-Z0-9\s.+\-#]', '', text)
+
+        # 4. Collapse multiple spaces
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        return text.lower()
     except Exception as e:
         print(f"❌ Error reading PDF: {e}")
         return ""
-    # 🟢 IMPROVEMENT: Remove special characters for cleaner matching
-    return re.sub(r'[^a-zA-Z0-9\s.+]', '', text.lower())
 
 
 def extract_name_from_text(text):
@@ -76,67 +90,112 @@ def extract_text_from_video(video_path):
 
 
 def calculate_ai_score(resume_path, video_path, job_skills):
-    # 1. Extraction
+    print(f"\n🧠 AI DEBUG START ------------------")
+    print(f"📄 Resume Path: {resume_path}")
+    print(f"🛠️ Raw Job Skills from DB: {job_skills}")
+
+    # 1. Extraction (Now using the FIXED parser)
     resume_text = extract_text_from_pdf(resume_path)
+    print(f"📝 Extracted Text Length: {len(resume_text)} characters")
+
+    # Debug: Print first 100 chars to see if it's garbage
+    print(f"📝 Text Preview: {resume_text[:100]}...")
+
+    if len(resume_text) < 50:
+        print("❌ CRITICAL: Resume text is too short or empty! (Is it an image PDF?)")
+
     candidate_name = extract_name_from_text(resume_text)
     video_text = extract_text_from_video(video_path)
     full_text = resume_text + " " + video_text
 
+    # Safety Check
     if not full_text.strip():
         return 0, "Could not extract data from Resume or Video", None, "New Candidate"
 
     try:
-        # 2. Pre-process Required Skills (Handle Synonyms)
-        required_skills = [s.strip().lower() for s in job_skills.split(",")]
+        # 2. Skill Parsing (With Prints)
+        import json
+        required_skills = []
+
+        # Check if it looks like a JSON list (starts with bracket)
+        if isinstance(job_skills, list):
+            required_skills = [str(s).lower().strip() for s in job_skills]
+        elif job_skills and job_skills.strip().startswith("["):
+            try:
+                loaded_list = json.loads(job_skills)
+                required_skills = [str(s).lower().strip() for s in loaded_list]
+                print(f"✅ JSON Skills Parsed: {required_skills}")
+            except:
+                required_skills = [s.strip().lower() for s in job_skills.split(",")]
+                print(f"⚠️ JSON Parse Failed, fell back to CSV: {required_skills}")
+        else:
+            required_skills = [s.strip().lower() for s in job_skills.split(",")]
+            print(f"✅ CSV Skills Parsed: {required_skills}")
+
+        # Clean up
+        required_skills = [s for s in required_skills if s]
 
         graph_points = {}
         matched_count = 0
         total_weight = len(required_skills)
-        missing_skills = []
+        matched_skills_list = []
+        missing_skills_list = []
 
-        # 🟢 SMART MATCHING LOGIC
+        # 3. Matching (With Prints)
+        full_text_lower = full_text.lower()  # Ensure lowercase match
+
         for skill in required_skills:
+            # A. Exact Match
+            # Use strict boundaries ONLY for simple words to avoid partial matches
+            # But allow substring matching for complex terms (e.g., C++)
+            escaped_skill = re.escape(skill)
 
-            # A. Check for Exact Word Match (Regex Boundary)
-            # This prevents "Java" matching "JavaScript" incorrectly
-            pattern = r'\b' + re.escape(skill) + r'\b'
-            exact_match = re.search(pattern, full_text)
+            # Default: Assume match if the skill string exists in text
+            is_match = False
+            if skill in full_text_lower:
+                is_match = True
 
-            # B. Check for Synonyms (Semantic Matching)
-            synonym_match = False
-            if not exact_match and skill in SYNONYM_DB:
+            # B. Synonym Match
+            if not is_match and skill in SYNONYM_DB:
                 for syn in SYNONYM_DB[skill]:
-                    if syn in full_text:
-                        synonym_match = True
+                    if syn in full_text_lower:
+                        is_match = True
                         break
 
-            # C. Check for Fuzzy Match (Typo Tolerance)
-            # If candidate wrote "Recat" instead of "React"
-            fuzzy_match = False
-            if not exact_match and not synonym_match:
-                # Check if any word in text is >90% similar
-                if fuzz.partial_token_set_ratio(skill, full_text) > 90:
-                    fuzzy_match = True
+            # C. Fuzzy Match
+            if not is_match:
+                if fuzz.partial_token_set_ratio(skill, full_text_lower) > 90:
+                    is_match = True
 
             # Final Decision
-            if exact_match or synonym_match or fuzzy_match:
+            if is_match:
+                print(f"   ✅ MATCHED: {skill}")
                 matched_count += 1
                 graph_points[skill] = 100
+                matched_skills_list.append(skill.title())
             else:
-                missing_skills.append(skill)
+                print(f"   ❌ MISSING: {skill}")
                 graph_points[skill] = 0
+                missing_skills_list.append(skill.title())
 
-        # 3. Calculate Score
+        # 4. Score Calculation
         score = int((matched_count / total_weight) * 100) if total_weight > 0 else 0
+        print(f"🏆 FINAL SCORE: {score}%")
+        print(f"🧠 AI DEBUG END --------------------\n")
 
-        # 4. Generate Feedback
-        if missing_skills:
-            feedback_str = f"Missing skills: {', '.join(missing_skills)}"
+        # 5. Feedback
+        if missing_skills_list:
+            feedback_str = f"Missing critical skills: {', '.join(missing_skills_list[:3])}."
         else:
             feedback_str = "Excellent match! Candidate possesses all required skills."
 
-        return score, feedback_str, graph_points, candidate_name
+        ai_graph_data = {
+            "matched": matched_skills_list,
+            "missing": missing_skills_list
+        }
+
+        return score, feedback_str, ai_graph_data, candidate_name
 
     except Exception as e:
-        print(f"❌ Calculation Error: {e}")
+        print(f"❌ CRITICAL CALCULATION ERROR: {e}")
         return 0, "Error calculating score", None, "New Candidate"
