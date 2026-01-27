@@ -19,6 +19,8 @@ export default function HRApplicants() {
     return {
       ...app,
       trust_score: app.trust_score !== undefined ? app.trust_score : 100,
+      // 👇 NEW: Handle the sentiment data coming from backend
+      video_sentiment: app.video_sentiment || "Not Analyzed",
       tab_switches: app.tab_switches || 0,
       faces_detected: app.faces_detected || "Single Face",
       voices_detected: app.voices_detected || "Single Voice",
@@ -113,6 +115,45 @@ export default function HRApplicants() {
       if (score >= 90) return "bg-blue-50 text-blue-700 border-blue-200";
       if (score >= 70) return "bg-orange-50 text-orange-700 border-orange-200";
       return "bg-red-50 text-red-700 border-red-200 animate-pulse";
+  };
+
+  // 🟢 PROFESSIONAL UPGRADE: Smart Sentiment Config
+  const getSentimentConfig = (sentiment) => {
+      // Normalize input to handle case variations
+      const s = (sentiment || "").toLowerCase();
+
+      if (s.includes("positive")) return {
+          style: "bg-emerald-100 text-emerald-700 border-emerald-200",
+          icon: "✨",
+          label: "Positive Attitude",
+          tooltip: "AI Analysis: Candidate displayed high confidence, clear modulation, and positive facial expressions."
+      };
+      if (s.includes("negative")) return {
+          style: "bg-rose-50 text-rose-700 border-rose-200",
+          icon: "🚩",
+          label: "Negative / Flat",
+          tooltip: "AI Analysis: Detected low energy, hesitation, or negative keywords in speech."
+      };
+      if (s.includes("nervous")) return {
+          style: "bg-amber-50 text-amber-700 border-amber-200",
+          icon: "😰",
+          label: "Nervous Tone",
+          tooltip: "AI Analysis: Detected rapid speech, stuttering, or lack of sustained eye contact."
+      };
+      if (s.includes("neutral")) return {
+          style: "bg-blue-50 text-blue-600 border-blue-200",
+          icon: "😐",
+          label: "Neutral",
+          tooltip: "AI Analysis: Standard professional tone with balanced emotion."
+      };
+
+      // Default / Not Analyzed
+      return {
+          style: "bg-slate-100 text-slate-500 border-slate-200",
+          icon: "⏸️",
+          label: "Not Analyzed",
+          tooltip: "Video data not available or not yet processed."
+      };
   };
 
   // 🟢 UPDATED: Renders Logic for Shortlisted (Interview) -> Hired
@@ -331,15 +372,37 @@ export default function HRApplicants() {
                         </div>
                     </div>
 
-                    <div className="w-32 flex flex-col items-end justify-center">
+                    {/* 🟢 PROFESSIONAL SENTIMENT BADGE WITH TOOLTIP */}
+                    <div className="w-40 flex flex-col items-end justify-center gap-2">
+
+                        {/* 1. Trust Score */}
                         <div className={`px-3 py-1 rounded-full border text-[10px] font-black uppercase flex items-center gap-1 ${getTrustColor(app.trust_score)}`}>
                             <span>🛡️</span> {app.trust_score}% Trust
                         </div>
+
+                        {/* 2. SMART SENTIMENT PILL */}
+                        {(() => {
+                            const config = getSentimentConfig(app.video_sentiment);
+                            return (
+                                <div
+                                    className={`group relative cursor-help px-3 py-1 rounded-full border text-[10px] font-black uppercase flex items-center gap-1.5 transition-all hover:scale-105 ${config.style}`}
+                                >
+                                    <span className="text-sm">{config.icon}</span>
+                                    <span>{config.label}</span>
+
+                                    {/* Tooltip on Hover */}
+                                    <div className="absolute bottom-full mb-2 right-0 w-48 bg-slate-800 text-white text-[10px] font-medium p-2 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                                        {config.tooltip}
+                                        <div className="absolute top-full right-4 border-4 border-transparent border-t-slate-800"></div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
 
                     <div className="flex items-center gap-2">
                         <button onClick={() => setSelectedCandidate(app)} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-50">View</button>
-                        {/* 🟢 Uses the new Action Buttons */}
+                        {/* 🟢 Action Buttons */}
                         {renderActionButtons(app)}
                     </div>
                 </div>
