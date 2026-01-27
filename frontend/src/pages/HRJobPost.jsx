@@ -6,7 +6,7 @@ export default function HRJobPost() {
   const [formData, setFormData] = useState({
     title: "",
     description: "",
-    skills_required: "",
+    required_skills: "",
     location: "",
     experience_required: "",
     salary_range: "",
@@ -20,19 +20,76 @@ export default function HRJobPost() {
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
+// 🟢 NEW: Handle File Upload & Auto-Fill
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
+    // 1. Set the file in state (for saving later)
+    setFormData({ ...formData, job_description_file: file });
+
+    // 2. Prepare to send to backend for parsing
+    const uploadData = new FormData();
+    uploadData.append("file", file);
+
+    setLoading(true); // Show loading state while parsing
+    try {
+      // NOTE: Ensure you have created this endpoint in your backend
+      const res = await fetch("http://localhost:5000/api/hr/parse-jd", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }, // Don't add Content-Type for FormData
+        body: uploadData,
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        // 🟢 MAGICAL FIX: Auto-fill the description box with the PDF text
+        setFormData((prev) => ({
+          ...prev,
+          description: data.extractedText, // The text from the PDF
+          required_skills: data.extractedSkills || prev.required_skills // Optional: Auto-fill skills
+        }));
+        alert("JD Parsed! Description has been auto-filled.");
+      } else {
+        console.error("Parse error:", data.error);
+      }
+    } catch (err) {
+      console.error("Upload failed", err);
+    } finally {
+      setLoading(false);
+    }
+  };
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+
+    // 🟢 1. Create a FormData object (The vehicle for files)
+    const submissionData = new FormData();
+
+    // 🟢 2. Append all text fields manually
+    submissionData.append("title", formData.title);
+    submissionData.append("description", formData.description);
+    submissionData.append("required_skills", formData.required_skills);
+    submissionData.append("location", formData.location);
+    submissionData.append("experience_required", formData.experience_required);
+    submissionData.append("salary_range", formData.salary_range);
+
+    // 🟢 3. Append the FILE (The critical part)
+    // Only append if the user actually selected a file
+    if (formData.job_description_file) {
+        submissionData.append("job_description_file", formData.job_description_file);
+    }
 
     try {
       const res = await fetch("http://localhost:5000/api/hr/create-job", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          // ❌ REMOVE "Content-Type": "application/json"
+          // When using FormData, the browser sets the correct Content-Type (multipart/form-data) automatically.
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(formData),
+        body: submissionData, // 🟢 Send the FormData object, NOT JSON string
       });
 
       const data = await res.json();
@@ -48,7 +105,6 @@ export default function HRJobPost() {
       setLoading(false);
     }
   };
-
   return (
     <HRLayout>
       <div className="p-8 max-w-7xl mx-auto min-h-screen font-sans bg-slate-50/50">
@@ -172,8 +228,8 @@ export default function HRJobPost() {
                       <span className="absolute left-4 top-3.5 text-lg grayscale opacity-50 group-focus-within:grayscale-0 group-focus-within:opacity-100 transition-all">🧠</span>
                       <input
                         required
-                        name="skills_required"
-                        value={formData.skills_required}
+                        name="required_skills"
+                        value={formData.required_skills}
                         onChange={handleChange}
                         className="w-full pl-12 pr-4 py-3.5 bg-white border border-purple-200 rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium text-slate-700 shadow-sm"
                         placeholder="e.g. React, Node.js, AWS, TypeScript (Comma separated)"
@@ -213,19 +269,35 @@ export default function HRJobPost() {
                  </div>
 
                  {/* File URL */}
-                 <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2 tracking-wide">External JD Link <span className="text-slate-300 normal-case font-normal">(Optional)</span></label>
-                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
-                       <span className="bg-slate-100 text-slate-500 px-4 py-3.5 text-xs font-bold border-r border-slate-200 tracking-wider">HTTPS://</span>
-                       <input
-                        name="job_description_file"
-                        value={formData.job_description_file}
-                        onChange={handleChange}
-                        className="w-full p-3.5 bg-transparent outline-none text-sm font-bold text-slate-600 placeholder:font-normal"
-                        placeholder="drive.google.com/doc..."
-                       />
-                    </div>
-                 </div>
+                 {/* NEW CODE (ADD THIS) */}
+<div>
+   <label className="block text-xs font-bold text-slate-500 uppercase mb-2 tracking-wide">
+      Auto-Fill from PDF <span className="text-blue-500 font-bold normal-case">(Recommended)</span>
+   </label>
+
+   <div className="border-2 border-dashed border-slate-200 hover:border-blue-400 bg-slate-50 hover:bg-blue-50/30 rounded-xl transition-all p-6 text-center group cursor-pointer relative">
+      <input
+        type="file"
+        accept=".pdf,.doc,.docx"
+        onChange={handleFileUpload}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+      />
+
+      <div className="flex flex-col items-center gap-2">
+         <span className="text-2xl group-hover:scale-110 transition-transform">📄</span>
+         <p className="text-sm font-bold text-slate-600">
+            {formData.job_description_file?.name ? (
+               <span className="text-blue-600">Selected: {formData.job_description_file.name}</span>
+            ) : (
+               "Click to Upload JD (PDF/DOCX)"
+            )}
+         </p>
+         <p className="text-xs text-slate-400">
+            This will extract text and fill the description automatically.
+         </p>
+      </div>
+   </div>
+</div>
               </div>
 
               {/* ACTION BAR */}
@@ -296,12 +368,13 @@ export default function HRJobPost() {
                   </p>
 
                   <div className="flex flex-wrap gap-2 mb-6 min-h-[40px]">
-                     {(formData.skills_required ? formData.skills_required.split(',') : ["Skill 1", "Skill 2"]).slice(0,3).map((s,i) => (
+                     {/* ✅ Updated to use required_skills */}
+                     {(formData.required_skills ? formData.required_skills.split(',') : ["Skill 1", "Skill 2"]).slice(0,3).map((s,i) => (
                         <span key={i} className="text-[10px] font-bold bg-white/10 text-white border border-white/20 px-2 py-1 rounded-md">
-                           {s.trim()}
-                        </span>
-                     ))}
-                     {(formData.skills_required?.split(',').length > 3) && <span className="text-[10px] text-indigo-200 self-center font-medium">+More</span>}
+                            {s.trim()}
+                         </span>
+))}
+{(formData.required_skills?.split(',').length > 3) && <span className="text-[10px] text-indigo-200 self-center font-medium">+More</span>}
                   </div>
 
                   <button className="w-full py-3 bg-white text-indigo-700 text-xs font-bold rounded-xl shadow-lg hover:bg-indigo-50 transition cursor-not-allowed opacity-90">

@@ -47,16 +47,27 @@ export default function HRJobList() {
     setFilteredJobs(result);
   }, [searchTerm, locationFilter, jobs]);
 
-  async function handleDelete(id) {
+ async function handleDelete(id) {
     if (!window.confirm("Are you sure you want to permanently delete this job?")) return;
+
     try {
-      await fetch(`http://localhost:5000/api/jobs/${id}`, {
+      const res = await fetch(`http://localhost:5000/api/jobs/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
-      fetchJobs();
+
+      // 🟢 FIX: Check if the deletion was actually successful
+      if (res.ok) {
+        alert("Job deleted successfully");
+        fetchJobs(); // Only refresh if it worked
+      } else {
+        // If failed, read the error message from backend
+        const data = await res.json();
+        alert(`Failed to delete: ${data.error || "Unknown error"}`);
+      }
     } catch (error) {
       console.error("Delete failed:", error);
+      alert("Network Error: Could not connect to server.");
     }
   }
 

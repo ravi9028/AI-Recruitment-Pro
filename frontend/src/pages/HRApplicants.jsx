@@ -14,11 +14,10 @@ export default function HRApplicants() {
     fetchApplicants();
   }, [jobId]);
 
-  // 🟢 HELPER: Normalize Data (Uses REAL Database Columns)
+  // 🟢 HELPER: Normalize Data
   const enhanceCandidateData = (app) => {
     return {
       ...app,
-      // If data is missing (e.g. old record), default to '100% Clean'
       trust_score: app.trust_score !== undefined ? app.trust_score : 100,
       tab_switches: app.tab_switches || 0,
       faces_detected: app.faces_detected || "Single Face",
@@ -47,10 +46,8 @@ export default function HRApplicants() {
       let list = data.applicants || data || [];
       if (!Array.isArray(list)) list = [];
 
-      // 3. Process Data
+      // 3. Process Data & Sort by AI Score
       const enhancedList = list.map(enhanceCandidateData);
-
-      // Sort: High AI Score first
       const sorted = enhancedList.sort((a, b) => b.ai_score - a.ai_score);
 
       setApplicants(sorted);
@@ -61,9 +58,11 @@ export default function HRApplicants() {
     }
   };
 
+  // 🟢 FIXED: Now accepts dynamic status (Shortlisted OR Rejected)
   const handleStatusUpdate = async (appId, newStatus) => {
+    // Optimistic UI Update
     setApplicants(prev => prev.map(app =>
-        app.id === appId ? { ...app, status: "Shortlisted" } : app
+        app.id === appId ? { ...app, status: newStatus } : app
     ));
 
     try {
@@ -73,10 +72,12 @@ export default function HRApplicants() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ status: "Shortlisted" }),
+        // Send the specific status clicked
+        body: JSON.stringify({ status: newStatus }),
       });
     } catch (err) {
       console.error("Failed to update status");
+      alert("Failed to update status on server.");
     }
   };
 
@@ -108,28 +109,51 @@ export default function HRApplicants() {
     return "text-red-600 bg-red-50 border-red-200";
   };
 
-  // 🛡️ TRUST COLOR HELPER
   const getTrustColor = (score) => {
-      if (score >= 90) return "bg-blue-50 text-blue-700 border-blue-200"; // High Trust (Blue)
-      if (score >= 70) return "bg-orange-50 text-orange-700 border-orange-200"; // Suspicious (Orange)
-      return "bg-red-50 text-red-700 border-red-200 animate-pulse"; // ⚠️ Malpractice (Red)
+      if (score >= 90) return "bg-blue-50 text-blue-700 border-blue-200";
+      if (score >= 70) return "bg-orange-50 text-orange-700 border-orange-200";
+      return "bg-red-50 text-red-700 border-red-200 animate-pulse";
   };
 
-  const renderShortlistButton = (app, isPrimary = false) => {
+  // 🟢 NEW: Renders Reject AND Shortlist Buttons
+  const renderActionButtons = (app, isPrimary = false) => {
+      // 1. ALREADY SHORTLISTED
       if (app.status === "Shortlisted") {
           return (
-              <button disabled className={`px-4 py-2 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg border border-emerald-200 cursor-not-allowed flex items-center gap-2 ${isPrimary ? 'w-full justify-center py-3' : ''}`}>
+              <button disabled className={`px-4 py-2 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg border border-emerald-200 cursor-not-allowed flex items-center gap-2 justify-center ${isPrimary ? 'w-full py-3' : ''}`}>
                   <span>✅ Shortlisted</span>
               </button>
           );
       }
+
+      // 2. ALREADY REJECTED
+      if (app.status === "Rejected") {
+          return (
+              <button disabled className={`px-4 py-2 bg-red-100 text-red-700 text-xs font-bold rounded-lg border border-red-200 cursor-not-allowed flex items-center gap-2 justify-center ${isPrimary ? 'w-full py-3' : ''}`}>
+                  <span>❌ Rejected</span>
+              </button>
+          );
+      }
+
+      // 3. PENDING ACTIONS (Reject | Shortlist)
       return (
-          <button
-            onClick={() => handleStatusUpdate(app.id, "shortlisted")}
-            className={`${isPrimary ? 'w-full py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-lg hover:from-yellow-600' : 'px-4 py-2 bg-slate-900 text-white hover:bg-slate-800'} text-xs font-bold rounded-lg transition`}
-          >
-             {isPrimary ? '🏆 Shortlist' : 'Shortlist'}
-          </button>
+          <div className={`flex gap-2 ${isPrimary ? 'w-full' : ''}`}>
+             {/* REJECT BUTTON */}
+             <button
+                onClick={() => handleStatusUpdate(app.id, "Rejected")}
+                className={`flex-1 px-3 py-2 bg-white border border-red-200 text-red-500 hover:bg-red-50 text-xs font-bold rounded-lg transition ${isPrimary ? 'py-3' : ''}`}
+             >
+                Reject
+             </button>
+
+             {/* SHORTLIST BUTTON */}
+             <button
+                onClick={() => handleStatusUpdate(app.id, "Shortlisted")}
+                className={`flex-[2] px-3 py-2 ${isPrimary ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-lg hover:from-yellow-600' : 'bg-slate-900 text-white hover:bg-slate-800'} text-xs font-bold rounded-lg transition ${isPrimary ? 'py-3' : ''}`}
+             >
+                {isPrimary ? '🏆 Shortlist' : 'Shortlist'}
+             </button>
+          </div>
       );
   };
 
@@ -155,7 +179,7 @@ export default function HRApplicants() {
           </div>
         </div>
 
-        {/* 2. TOP 3 PODIUM (Visuals for Top Candidates) */}
+        {/* 2. TOP 3 PODIUM */}
         {applicants.length > 0 && (
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12 items-end">
               {/* RANK #2 */}
@@ -171,7 +195,7 @@ export default function HRApplicants() {
                           <p className="text-xs text-slate-500 font-medium">{applicants[1].user?.email}</p>
                        </div>
                     </div>
-                    {/* Trust Badge */}
+
                     <div className={`mb-4 flex items-center justify-between px-3 py-2 rounded-lg border ${getTrustColor(applicants[1].trust_score)}`}>
                         <span className="text-[10px] font-black uppercase tracking-wider flex items-center gap-1">🛡️ Trust Score</span>
                         <span className="text-sm font-black">{applicants[1].trust_score}%</span>
@@ -182,7 +206,7 @@ export default function HRApplicants() {
 
                     <div className="flex flex-col gap-2">
                          <button onClick={() => setSelectedCandidate(applicants[1])} className="w-full py-2 bg-slate-50 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-100">View Profile</button>
-                         {renderShortlistButton(applicants[1], true)}
+                         {renderActionButtons(applicants[1], true)}
                     </div>
                  </div>
               )}
@@ -199,7 +223,6 @@ export default function HRApplicants() {
                        <p className="text-sm text-slate-500 font-medium">{applicants[0].user?.email}</p>
                     </div>
 
-                    {/* Trust Badge Large */}
                     <div className={`mx-auto mb-6 flex items-center justify-center gap-3 px-4 py-2 rounded-xl border w-fit ${getTrustColor(applicants[0].trust_score)}`}>
                         <span className="text-xs font-black uppercase tracking-wider">🛡️ Proctoring</span>
                         <span className="text-lg font-black">{applicants[0].trust_score}% Clean</span>
@@ -210,7 +233,10 @@ export default function HRApplicants() {
 
                     <div className="flex gap-3">
                          <button onClick={() => setSelectedCandidate(applicants[0])} className="flex-1 py-3 bg-slate-50 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-100 transition">Profile</button>
-                         {renderShortlistButton(applicants[0], true)}
+                         {/* 🟢 Replaced with new action buttons */}
+                         <div className="flex-[2]">
+                            {renderActionButtons(applicants[0], true)}
+                         </div>
                     </div>
                  </div>
               )}
@@ -228,7 +254,7 @@ export default function HRApplicants() {
                           <p className="text-xs text-slate-500 font-medium">{applicants[2].user?.email}</p>
                        </div>
                     </div>
-                    {/* Trust Badge */}
+
                     <div className={`mb-4 flex items-center justify-between px-3 py-2 rounded-lg border ${getTrustColor(applicants[2].trust_score)}`}>
                         <span className="text-[10px] font-black uppercase tracking-wider flex items-center gap-1">🛡️ Trust Score</span>
                         <span className="text-sm font-black">{applicants[2].trust_score}%</span>
@@ -239,17 +265,17 @@ export default function HRApplicants() {
 
                     <div className="flex flex-col gap-2">
                          <button onClick={() => setSelectedCandidate(applicants[2])} className="w-full py-2 bg-slate-50 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-100">View Profile</button>
-                         {renderShortlistButton(applicants[2], true)}
+                         {renderActionButtons(applicants[2], true)}
                     </div>
                  </div>
               )}
            </div>
         )}
 
-        {/* 3. LIST VIEW (CLEAN VERSION - NO WARNING TEXT) */}
+        {/* 3. LIST VIEW */}
         <div className="space-y-4">
            {applicants.map((app, index) => (
-             <div key={app.id} className={`group relative bg-white p-5 rounded-2xl border transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 ${app.status === "Shortlisted" ? "border-emerald-200 bg-emerald-50/10" : "border-slate-100"}`}>
+             <div key={app.id} className={`group relative bg-white p-5 rounded-2xl border transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 ${app.status === "Shortlisted" ? "border-emerald-200 bg-emerald-50/10" : app.status === "Rejected" ? "border-red-200 bg-red-50/10" : "border-slate-100"}`}>
                 <div className="flex flex-col md:flex-row gap-6 items-center">
                     <div className="hidden md:flex flex-col items-center justify-center w-12 flex-shrink-0 text-slate-300"><span className="text-xl font-black">#{index + 1}</span></div>
 
@@ -261,7 +287,6 @@ export default function HRApplicants() {
                         </div>
                     </div>
 
-                    {/* AI Score */}
                     <div className="flex-1">
                         <div className="flex items-center gap-2">
                             <span className={`text-2xl font-black ${getScoreColor(app.ai_score).split(" ")[0]}`}>{app.ai_score}%</span>
@@ -269,7 +294,6 @@ export default function HRApplicants() {
                         </div>
                     </div>
 
-                    {/* 🛡️ PROCTORING ALERT COLUMN (Cleaned Up - Badge Only) */}
                     <div className="w-32 flex flex-col items-end justify-center">
                         <div className={`px-3 py-1 rounded-full border text-[10px] font-black uppercase flex items-center gap-1 ${getTrustColor(app.trust_score)}`}>
                             <span>🛡️</span> {app.trust_score}% Trust
@@ -278,19 +302,19 @@ export default function HRApplicants() {
 
                     <div className="flex items-center gap-2">
                         <button onClick={() => setSelectedCandidate(app)} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-50">View</button>
-                        {renderShortlistButton(app)}
+                        {/* 🟢 Uses the new Action Buttons */}
+                        {renderActionButtons(app)}
                     </div>
                 </div>
              </div>
            ))}
         </div>
 
-        {/* 4. MODAL (Shows Detailed Warnings Here) */}
+        {/* 4. MODAL (No Changes needed) */}
         {selectedCandidate && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-slate-50 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto relative">
-
-                    {/* MODAL HEADER */}
+                    {/* Header */}
                     <div className="relative bg-slate-900 p-8 pb-16">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -mr-16 -mt-16"></div>
                         <button onClick={() => setSelectedCandidate(null)} className="absolute top-6 right-6 text-white text-2xl font-bold hover:text-red-400 transition z-20">&times;</button>
@@ -310,10 +334,8 @@ export default function HRApplicants() {
                         </div>
                     </div>
 
-                    {/* MODAL BODY */}
+                    {/* Body */}
                     <div className="px-8 pb-8 -mt-10 relative z-10 space-y-6">
-
-                        {/* 🛡️ PROCTORING REPORT (Details Shown Here) */}
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex items-center justify-between">
                             <div>
                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">
@@ -329,8 +351,6 @@ export default function HRApplicants() {
                             </div>
                         </div>
 
-                        {/* ⚠️ FIX: CHANGED THRESHOLD FROM 90 -> 100 */}
-                        {/* Now, ANY score below 100 will show the warning details */}
                         {selectedCandidate.trust_score < 100 && (
                             <div className="p-4 bg-red-50 border border-red-100 rounded-xl flex gap-3 items-start">
                                 <span className="text-2xl">⚠️</span>
@@ -345,7 +365,6 @@ export default function HRApplicants() {
                             </div>
                         )}
 
-                        {/* SKILLS CARD */}
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                                 <span>⚡</span> Top Skills
@@ -363,7 +382,6 @@ export default function HRApplicants() {
                             </div>
                         </div>
 
-                        {/* EDUCATION & EXPERIENCE (Preserved) */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Experience</h4>
@@ -376,7 +394,6 @@ export default function HRApplicants() {
                         </div>
                     </div>
 
-                    {/* MODAL FOOTER */}
                     <div className="p-6 bg-white border-t border-slate-100 flex justify-end gap-3 sticky bottom-0 z-20 rounded-b-3xl">
                         <button onClick={() => setSelectedCandidate(null)} className="px-6 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition">Close</button>
 

@@ -4,7 +4,7 @@ export default function EditJobSidebar({ job, open, onClose, onSave }) {
   const [formData, setFormData] = useState({
     title: "",
     description: "",
-    skills_required: "",
+    required_skills: "",
     location: "",
     experience_required: "",
     salary_range: "", // Added Salary field
@@ -18,7 +18,7 @@ export default function EditJobSidebar({ job, open, onClose, onSave }) {
         id: job.id,
         title: job.title || "",
         description: job.description || "",
-        skills_required: job.skills_required || "",
+        required_skills: job.required_skills || "",
         location: job.location || "",
         experience_required: job.experience_required || "",
         salary_range: job.salary_range || "",
@@ -118,8 +118,8 @@ export default function EditJobSidebar({ job, open, onClose, onSave }) {
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Required Skills</label>
             <input
               type="text"
-              name="skills_required"
-              value={formData.skills_required}
+              name="required_skills"
+              value={formData.required_skills}
               onChange={handleChange}
               className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               placeholder="e.g. Python, Django, SQL"
