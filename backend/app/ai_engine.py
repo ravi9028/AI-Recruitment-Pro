@@ -5,6 +5,7 @@ import speech_recognition as sr
 from moviepy.editor import VideoFileClip
 from thefuzz import fuzz  # Handles spelling mistakes
 from pdfminer.high_level import extract_text  # 🟢 NEW: The Fix for "No Spaces"
+from textblob import TextBlob  # 🟢 NEW: Sentiment Analysis
 
 # ---------------------------------------------------------
 # 🧠 INTELLIGENT SKILL MAPPING (The Brain)
@@ -89,23 +90,44 @@ def extract_text_from_video(video_path):
         return ""
 
 
+def analyze_sentiment(text):
+    """
+    🟢 NEW: Returns a score modifier based on confidence/positivity.
+    """
+    if not text:
+        return 0, "No audio detected."
+
+    # Analyze the text
+    analysis = TextBlob(text)
+    polarity = analysis.sentiment.polarity  # Range: -1 (Negative) to +1 (Positive)
+    subjectivity = analysis.sentiment.subjectivity  # Range: 0 (Objective) to 1 (Subjective)
+
+    # Logic: High positivity (+0.3) gets bonus. Negative gets penalty.
+    if polarity > 0.3:
+        return 10, "Confident & Positive Tone (+10%)"
+    elif polarity < -0.1:
+        return -5, "Nervous or Negative Tone (-5%)"
+    else:
+        return 0, "Neutral Tone"
+
+
 def calculate_ai_score(resume_path, video_path, job_skills):
     print(f"\n🧠 AI DEBUG START ------------------")
     print(f"📄 Resume Path: {resume_path}")
     print(f"🛠️ Raw Job Skills from DB: {job_skills}")
 
-    # 1. Extraction (Now using the FIXED parser)
+    # 1. Extraction
     resume_text = extract_text_from_pdf(resume_path)
     print(f"📝 Extracted Text Length: {len(resume_text)} characters")
 
-    # Debug: Print first 100 chars to see if it's garbage
-    print(f"📝 Text Preview: {resume_text[:100]}...")
+    # 🟢 NEW: Process Video Text
+    video_text = extract_text_from_video(video_path)
 
-    if len(resume_text) < 50:
-        print("❌ CRITICAL: Resume text is too short or empty! (Is it an image PDF?)")
+    # 🟢 NEW: Calculate Sentiment
+    sentiment_bonus, sentiment_feedback = analyze_sentiment(video_text)
+    print(f"🎤 Video Sentiment: {sentiment_feedback} (Bonus: {sentiment_bonus}%)")
 
     candidate_name = extract_name_from_text(resume_text)
-    video_text = extract_text_from_video(video_path)
     full_text = resume_text + " " + video_text
 
     # Safety Check
@@ -113,88 +135,81 @@ def calculate_ai_score(resume_path, video_path, job_skills):
         return 0, "Could not extract data from Resume or Video", None, "New Candidate"
 
     try:
-        # 2. Skill Parsing (With Prints)
+        # 2. Skill Parsing
         import json
         required_skills = []
 
-        # Check if it looks like a JSON list (starts with bracket)
         if isinstance(job_skills, list):
             required_skills = [str(s).lower().strip() for s in job_skills]
         elif job_skills and job_skills.strip().startswith("["):
             try:
                 loaded_list = json.loads(job_skills)
                 required_skills = [str(s).lower().strip() for s in loaded_list]
-                print(f"✅ JSON Skills Parsed: {required_skills}")
             except:
                 required_skills = [s.strip().lower() for s in job_skills.split(",")]
-                print(f"⚠️ JSON Parse Failed, fell back to CSV: {required_skills}")
         else:
             required_skills = [s.strip().lower() for s in job_skills.split(",")]
-            print(f"✅ CSV Skills Parsed: {required_skills}")
 
-        # Clean up
         required_skills = [s for s in required_skills if s]
 
-        graph_points = {}
         matched_count = 0
         total_weight = len(required_skills)
         matched_skills_list = []
         missing_skills_list = []
 
-        # 3. Matching (With Prints)
-        full_text_lower = full_text.lower()  # Ensure lowercase match
+        # 3. Matching
+        full_text_lower = full_text.lower()
 
         for skill in required_skills:
-            # A. Exact Match
-            # Use strict boundaries ONLY for simple words to avoid partial matches
-            # But allow substring matching for complex terms (e.g., C++)
             escaped_skill = re.escape(skill)
-
-            # Default: Assume match if the skill string exists in text
             is_match = False
+
+            # Check Exact
             if skill in full_text_lower:
                 is_match = True
 
-            # B. Synonym Match
+            # Check Synonym
             if not is_match and skill in SYNONYM_DB:
                 for syn in SYNONYM_DB[skill]:
                     if syn in full_text_lower:
                         is_match = True
                         break
 
-            # C. Fuzzy Match
+            # Check Fuzzy
             if not is_match:
                 if fuzz.partial_token_set_ratio(skill, full_text_lower) > 90:
                     is_match = True
 
-            # Final Decision
             if is_match:
-                print(f"   ✅ MATCHED: {skill}")
                 matched_count += 1
-                graph_points[skill] = 100
                 matched_skills_list.append(skill.title())
             else:
-                print(f"   ❌ MISSING: {skill}")
-                graph_points[skill] = 0
                 missing_skills_list.append(skill.title())
 
-        # 4. Score Calculation
-        score = int((matched_count / total_weight) * 100) if total_weight > 0 else 0
-        print(f"🏆 FINAL SCORE: {score}%")
-        print(f"🧠 AI DEBUG END --------------------\n")
+        # 4. Score Calculation (UPDATED WITH SENTIMENT)
+        base_score = int((matched_count / total_weight) * 100) if total_weight > 0 else 0
+
+        # 🟢 Apply the Bonus/Penalty
+        final_score = base_score + sentiment_bonus
+
+        # Cap at 100, Floor at 0
+        final_score = max(0, min(100, final_score))
+
+        print(f"🏆 BASE: {base_score}% | SENTIMENT: {sentiment_bonus}% | FINAL: {final_score}%")
 
         # 5. Feedback
         if missing_skills_list:
-            feedback_str = f"Missing critical skills: {', '.join(missing_skills_list[:3])}."
+            feedback_str = f"Missing skills: {', '.join(missing_skills_list[:3])}. {sentiment_feedback}"
         else:
-            feedback_str = "Excellent match! Candidate possesses all required skills."
+            feedback_str = f"Excellent match! {sentiment_feedback}"
 
         ai_graph_data = {
             "matched": matched_skills_list,
-            "missing": missing_skills_list
+            "missing": missing_skills_list,
+            "sentiment": sentiment_feedback  # Store for graphs
         }
 
-        return score, feedback_str, ai_graph_data, candidate_name
+        return final_score, feedback_str, ai_graph_data, candidate_name
 
     except Exception as e:
         print(f"❌ CRITICAL CALCULATION ERROR: {e}")

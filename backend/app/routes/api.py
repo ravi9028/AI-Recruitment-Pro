@@ -12,6 +12,9 @@ from app import db
 from app.models import User, Job, Candidate, Application, CandidatePreference
 from flask_jwt_extended import verify_jwt_in_request
 from flask_cors import cross_origin
+import smtplib
+import ssl
+from email.message import EmailMessage
 import os
 import uuid
 import json
@@ -737,19 +740,26 @@ def get_candidate_applications():
 
 
 @api_bp.route("/hr/applications/<int:app_id>/status", methods=["PATCH"])
+@cross_origin()
 @jwt_required()
 @role_required("hr")
 def update_application_status(app_id):
+    # 👇👇👇 RAW CREDENTIALS (NO FLASK CONFIG) 👇👇👇
+    SENDER_EMAIL = "paint.it.onn@gmail.com"
+    SENDER_PASSWORD = "mpiq cggy rlxc hfkr"  # Your 16-digit App Password
+    # 👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆
+
     data = request.get_json()
     new_status = data.get("status")
 
-    if new_status not in ["Shortlisted", "Rejected"]:
+    if new_status not in ["Shortlisted", "Rejected", "Hired"]:
         return jsonify({"error": "Invalid status"}), 400
 
     app_record = Application.query.get_or_404(app_id)
     app_record.status = new_status
 
-    if new_status == "Shortlisted":
+    # Generate Link
+    if new_status == "Shortlisted" and not app_record.meeting_link:
         unique_room = f"Interview-{app_id}-{uuid.uuid4().hex[:6]}"
         app_record.meeting_link = f"https://meet.jit.si/{unique_room}"
 
@@ -757,41 +767,44 @@ def update_application_status(app_id):
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": "Database Commit Failed", "details": str(e)}), 500
+        return jsonify({"error": "Database error", "details": str(e)}), 500
 
-    email_body = ""
+    # --- EMAIL LOGIC (RAW PYTHON) ---
+    subject = f"Update: You are {new_status}!"
+    body = ""
+
     if new_status == "Shortlisted":
-        email_body = (
-            f"Hello {app_record.full_name},\n\n"
-            f"Congratulations! You have been Shortlisted for the interview.\n"
-            f"Your Interview Link: {app_record.meeting_link}\n\n"
-            f"Best Regards,\nHR Team"
-        )
+        body = f"Hello {app_record.full_name},\n\nYou have been Shortlisted! Join here:\n{app_record.meeting_link}\n\n- RecruitPro HR"
+    elif new_status == "Hired":
+        body = f"Hello {app_record.full_name},\n\nCongratulations! You are Hired.\n\n- RecruitPro HR"
     elif new_status == "Rejected":
-        email_body = (
-            f"Hello {app_record.full_name},\n\n"
-            f"Thank you for your interest. Unfortunately, we are not moving forward with your application.\n\n"
-            f"💡 AI FEEDBACK AVAILABLE: We have generated a detailed analysis of your resume.\n"
-            f"Please log in to your dashboard to view your 'Skill Gap Analysis' and see exactly where you lagged.\n\n"
-            f"Best Regards,\nHR Team"
-        )
+        body = f"Hello {app_record.full_name},\n\nThank you for applying.\n\n- RecruitPro HR"
 
+    # 🟢 DIRECT GMAIL CONNECTION (Bypasses Flask)
     try:
-        msg = Message(
-            subject=f"Application Status Update: {new_status}",
-            recipients=[app_record.email],
-            body=email_body
-        )
-        mail.send(msg)
+        msg = EmailMessage()
+        msg.set_content(body)
+        msg["Subject"] = subject
+        msg["From"] = SENDER_EMAIL
+        msg["To"] = app_record.email
+
+        # Connect to Gmail Port 587 (TLS)
+        context = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls(context=context)  # Secure the connection
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.send_message(msg)
+
+        print(f"✅ RAW SMTP SUCCESS: Email sent to {app_record.email}")
+
     except Exception as e:
-        print(f"⚠️ Email failed (Ignored): {e}")
+        print(f"❌ RAW SMTP FAILED: {e}")
+        # We catch the error so the app doesn't crash
 
     return jsonify({
-        "message": "Status updated successfully",
+        "message": f"Status updated to {new_status}",
         "meeting_link": app_record.meeting_link
     }), 200
-
-
 # -------------------------------------------------------
 # 🚨 AUTOMATED PROCTORING ENDPOINT (Updates DB Real-Time)
 # -------------------------------------------------------
@@ -909,7 +922,6 @@ def get_job_applicants(job_id):
 
 # -------------------------------------------------------
 # 🤖 RECRUITER CO-PILOT (AI CHATBOT) - UPGRADED & SAFE
-# -------------------------------------------------------
 @api_bp.route("/chat", methods=["POST"])
 @cross_origin()
 def chat_bot():
@@ -955,3 +967,69 @@ def chat_bot():
     except Exception as e:
         print(f"CHAT ERROR: {e}")
         return jsonify({"reply": "I'm having trouble connecting to the server. Please try again."}), 500
+
+    # -------------------------------------------------------
+    # 📊 HR ANALYTICS ENDPOINT (REAL DATA)
+    # -------------------------------------------------------
+@api_bp.route("/hr/analytics", methods=["GET"])
+@jwt_required()
+@role_required("hr")
+def get_analytics():
+        try:
+            # 1. Fetch all applications
+            apps = Application.query.all()
+            total = len(apps)
+
+            if total == 0:
+                return jsonify({
+                    "total": 0, "avg_score": 0, "avg_trust": 100,
+                    "sentiment": {"Positive": 0, "Neutral": 0, "Negative": 0},
+                    "missing_skills": []
+                })
+
+            # 2. Calculate Averages
+            total_ai_score = sum(app.score for app in apps if app.score is not None)
+            total_trust_score = sum(app.trust_score for app in apps if app.trust_score is not None)
+
+            avg_ai = round(total_ai_score / total, 1)
+            avg_trust = round(total_trust_score / total, 1)
+
+            # 3. Analyze Graph Data (Skills & Sentiment)
+            sentiment_counts = {"Positive": 0, "Neutral": 0, "Negative": 0}
+            missing_skills_map = {}
+
+            for app in apps:
+                # Parse the JSON graph data we saved earlier
+                if app.graph_data:
+                    # Handle case where it might be string or dict
+                    data = app.graph_data if isinstance(app.graph_data, dict) else json.loads(app.graph_data)
+
+                    # A. Count Sentiment
+                    sent_text = data.get("sentiment", "")
+                    if "Positive" in sent_text:
+                        sentiment_counts["Positive"] += 1
+                    elif "Negative" in sent_text:
+                        sentiment_counts["Negative"] += 1
+                    else:
+                        sentiment_counts["Neutral"] += 1
+
+                    # B. Count Missing Skills
+                    for skill in data.get("missing", []):
+                        missing_skills_map[skill] = missing_skills_map.get(skill, 0) + 1
+
+            # Sort missing skills by frequency (Top 5)
+            top_missing = sorted(missing_skills_map.items(), key=lambda x: x[1], reverse=True)[:5]
+            # Format for frontend: [{"name": "Java", "count": 3}, ...]
+            formatted_missing = [{"name": k, "count": v} for k, v in top_missing]
+
+            return jsonify({
+                "total": total,
+                "avg_score": avg_ai,
+                "avg_trust": avg_trust,
+                "sentiment": sentiment_counts,
+                "missing_skills": formatted_missing
+            }), 200
+
+        except Exception as e:
+            print(f"Analytics Error: {e}")
+            return jsonify({"error": str(e)}), 500

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import os
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
+from config import Config
 
 # Initialize Extensions
 db = SQLAlchemy()
@@ -19,6 +20,9 @@ def create_app():
     load_dotenv()
 
     app = Flask(__name__)
+
+    # 🟢 ADD THIS LINE: Load the permanent config
+    app.config.from_object(Config)
 
     # -------------------------------------------
     # ✅ 2. APPLY CORS IMMEDIATELY (Priority Fix)
