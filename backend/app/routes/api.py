@@ -861,8 +861,11 @@ def flag_application(app_id):
 # -------------------------------------------------------
 # ✅ THE FIX: DOUBLE ROUTE (Accepts both URL styles)
 # -------------------------------------------------------
-@api_bp.route("/hr/jobs/<int:job_id>/applicants", methods=["GET"])  # Style 1
-@api_bp.route("/jobs/<int:job_id>/applicants", methods=["GET"])  # Style 2 (Alias)
+# -------------------------------------------------------
+# ✅ GET APPLICANTS (NOW WITH SENTIMENT DATA)
+# -------------------------------------------------------
+@api_bp.route("/hr/jobs/<int:job_id>/applicants", methods=["GET"])
+@api_bp.route("/jobs/<int:job_id>/applicants", methods=["GET"])
 @cross_origin()
 def get_job_applicants(job_id):
     try:
@@ -875,11 +878,10 @@ def get_job_applicants(job_id):
 
         applicants_list = []
         for app, cand, user in results:
-            # Handle cases where User/Candidate might be None (safety check)
             candidate_name = app.full_name or (cand.name if cand else "Unknown")
             candidate_email = app.email or (user.email if user else "No Email")
 
-            # Safe Skills Parsing
+            # 1. Safe Skills Parsing
             cand_skills = []
             if cand and cand.skills:
                 try:
@@ -890,12 +892,32 @@ def get_job_applicants(job_id):
                 except:
                     cand_skills = [str(cand.skills)]
 
+            # 🟢 2. EXTRACT VIDEO SENTIMENT (New Logic)
+            video_sentiment = "Not Analyzed"
+            if app.graph_data:
+                try:
+                    # Handle both dict (if DB driver converts it) and string JSON
+                    gd = app.graph_data if isinstance(app.graph_data, dict) else json.loads(app.graph_data)
+                    video_sentiment = gd.get("sentiment", "Not Analyzed")
+
+                    # Clean up the string (e.g., remove "Tone" or extra text if needed)
+                    if "Positive" in video_sentiment:
+                        video_sentiment = "Positive"
+                    elif "Negative" in video_sentiment:
+                        video_sentiment = "Negative"
+                    elif "Neutral" in video_sentiment:
+                        video_sentiment = "Neutral"
+                    elif "Nervous" in video_sentiment:
+                        video_sentiment = "Nervous"
+                except Exception as e:
+                    print(f"⚠️ Error parsing graph_data for App {app.id}: {e}")
+
             applicants_list.append({
                 "id": app.id,
                 "ai_score": app.score or 0,
                 "ai_feedback": app.feedback or "No feedback yet.",
-                # 🟢 REAL DATA FROM DB
                 "trust_score": app.trust_score,
+                "video_sentiment": video_sentiment,  # 🟢 NEW FIELD SENT TO FRONTEND
                 "tab_switches": app.tab_switches,
                 "faces_detected": app.faces_detected,
                 "voices_detected": app.voices_detected,
@@ -918,7 +940,6 @@ def get_job_applicants(job_id):
     except Exception as e:
         print(f"🔥 ERROR in /applicants route: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
 
 # -------------------------------------------------------
 # 🤖 RECRUITER CO-PILOT (AI CHATBOT) - UPGRADED & SAFE
@@ -971,65 +992,89 @@ def chat_bot():
     # -------------------------------------------------------
     # 📊 HR ANALYTICS ENDPOINT (REAL DATA)
     # -------------------------------------------------------
+
+
+# -------------------------------------------------------
+# 📊 HR ANALYTICS - UPGRADED FOR JOB-SPECIFIC GRAPHS
+# -------------------------------------------------------
+# -------------------------------------------------------
+# 📊 HR ANALYTICS - UPGRADED: QUALITY DISTRIBUTION
+# -------------------------------------------------------
+# -------------------------------------------------------
+# 📊 HR ANALYTICS - THE TALENT MATRIX UPDATE
+# -------------------------------------------------------
 @api_bp.route("/hr/analytics", methods=["GET"])
 @jwt_required()
 @role_required("hr")
 def get_analytics():
-        try:
-            # 1. Fetch all applications
-            apps = Application.query.all()
-            total = len(apps)
+    try:
+        job_id = request.args.get('job_id')
 
-            if total == 0:
-                return jsonify({
-                    "total": 0, "avg_score": 0, "avg_trust": 100,
-                    "sentiment": {"Positive": 0, "Neutral": 0, "Negative": 0},
-                    "missing_skills": []
-                })
+        query = Application.query
+        if job_id and job_id != "all":
+            query = query.filter_by(job_id=job_id)
 
-            # 2. Calculate Averages
-            total_ai_score = sum(app.score for app in apps if app.score is not None)
-            total_trust_score = sum(app.trust_score for app in apps if app.trust_score is not None)
+        apps = query.all()
+        total = len(apps)
 
-            avg_ai = round(total_ai_score / total, 1)
-            avg_trust = round(total_trust_score / total, 1)
-
-            # 3. Analyze Graph Data (Skills & Sentiment)
-            sentiment_counts = {"Positive": 0, "Neutral": 0, "Negative": 0}
-            missing_skills_map = {}
-
-            for app in apps:
-                # Parse the JSON graph data we saved earlier
-                if app.graph_data:
-                    # Handle case where it might be string or dict
-                    data = app.graph_data if isinstance(app.graph_data, dict) else json.loads(app.graph_data)
-
-                    # A. Count Sentiment
-                    sent_text = data.get("sentiment", "")
-                    if "Positive" in sent_text:
-                        sentiment_counts["Positive"] += 1
-                    elif "Negative" in sent_text:
-                        sentiment_counts["Negative"] += 1
-                    else:
-                        sentiment_counts["Neutral"] += 1
-
-                    # B. Count Missing Skills
-                    for skill in data.get("missing", []):
-                        missing_skills_map[skill] = missing_skills_map.get(skill, 0) + 1
-
-            # Sort missing skills by frequency (Top 5)
-            top_missing = sorted(missing_skills_map.items(), key=lambda x: x[1], reverse=True)[:5]
-            # Format for frontend: [{"name": "Java", "count": 3}, ...]
-            formatted_missing = [{"name": k, "count": v} for k, v in top_missing]
-
+        if total == 0:
             return jsonify({
-                "total": total,
-                "avg_score": avg_ai,
-                "avg_trust": avg_trust,
-                "sentiment": sentiment_counts,
-                "missing_skills": formatted_missing
-            }), 200
+                "total": 0, "avg_score": 0, "avg_trust": 0,
+                "sentiment": [], "funnel": [],
+                "matrix": []  # 🟢 Empty Matrix
+            })
 
-        except Exception as e:
-            print(f"Analytics Error: {e}")
-            return jsonify({"error": str(e)}), 500
+        # 1. Averages
+        total_ai = sum(app.score for app in apps if app.score is not None)
+        total_trust = sum(app.trust_score for app in apps if app.trust_score is not None)
+
+        # 2. Sentiment Data
+        sent_counts = {"Positive": 0, "Neutral": 0, "Negative": 0}
+        for app in apps:
+            if app.graph_data:
+                gd = app.graph_data if isinstance(app.graph_data, dict) else json.loads(app.graph_data)
+                s_text = gd.get("sentiment", "Neutral")
+                if "Positive" in s_text:
+                    sent_counts["Positive"] += 1
+                elif "Negative" in s_text:
+                    sent_counts["Negative"] += 1
+                else:
+                    sent_counts["Neutral"] += 1
+
+        sentiment_data = [
+            {"name": "Positive", "value": sent_counts["Positive"], "fill": "#10b981"},
+            {"name": "Neutral", "value": sent_counts["Neutral"], "fill": "#64748b"},
+            {"name": "Negative", "value": sent_counts["Negative"], "fill": "#ef4444"}
+        ]
+
+        # 3. Funnel Data
+        funnel_data = [
+            {"name": "Applied", "value": total, "fill": "#3b82f6"},
+            {"name": "Shortlisted", "value": len([a for a in apps if a.status == "Shortlisted"]), "fill": "#f59e0b"},
+            {"name": "Hired", "value": len([a for a in apps if a.status == "Hired"]), "fill": "#10b981"},
+            {"name": "Rejected", "value": len([a for a in apps if a.status == "Rejected"]), "fill": "#ef4444"}
+        ]
+
+        # 🟢 4. TALENT MATRIX DATA (Scatter Plot Points)
+        # We map every candidate to an X (Trust) and Y (Skill) coordinate
+        matrix_data = []
+        for app in apps:
+            matrix_data.append({
+                "name": app.full_name.split()[0] if app.full_name else "Unknown",  # Just first name for graph
+                "x": app.trust_score or 0,  # X Axis: Trust
+                "y": app.score or 0,  # Y Axis: AI Skill Score
+                "status": app.status
+            })
+
+        return jsonify({
+            "total": total,
+            "avg_score": round(total_ai / total, 1) if total > 0 else 0,
+            "avg_trust": round(total_trust / total, 1) if total > 0 else 0,
+            "sentiment": sentiment_data,
+            "funnel": funnel_data,
+            "matrix": matrix_data  # 🟢 Sending the dots
+        }), 200
+
+    except Exception as e:
+        print(f"Analytics Error: {e}")
+        return jsonify({"error": str(e)}), 500
